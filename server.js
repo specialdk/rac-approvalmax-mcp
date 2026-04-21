@@ -1,9 +1,10 @@
-// ApprovalMax API Data Tester - OAuth + DB-backed token persistence
+// ApprovalMax API Data Tester - OAuth + DB-backed token persistence + real API endpoints
 // File: server.js
 
 const express = require('express');
 const fetch = require('node-fetch');
 const { Pool } = require('pg');
+const amClient = require('./approvalmax-client');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -11,7 +12,7 @@ const port = process.env.PORT || 3000;
 // ApprovalMax Configuration
 const APPROVALMAX_CONFIG = {
     clientId: process.env.APPROVALMAX_CLIENT_ID || '2A81A6DEEAA244C188D518BA59601780',
-    clientSecret: process.env.APPROVALMAX_CLIENT_SECRET || '', // Set in Railway env vars
+    clientSecret: process.env.APPROVALMAX_CLIENT_SECRET || '',
     redirectUri: process.env.APPROVALMAX_REDIRECT_URI || 'https://rac-approvalmax-mcp.up.railway.app/callback/approvalmax',
     baseUrl: 'https://public-api.approvalmax.com/api/v1',
     authUrl: 'https://identity.approvalmax.com/connect/authorize',
@@ -23,7 +24,6 @@ const APPROVALMAX_CONFIG = {
     ]
 };
 
-// Singleton integration key - AM issues one token per user unlocking multiple companies
 const INTEGRATION_KEY = 'approvalmax_integration';
 
 // Postgres connection pool
@@ -101,7 +101,6 @@ async function refreshApprovalMaxToken(refreshToken) {
         throw new Error(`Refresh failed: ${tokens.error || 'unknown'} - ${tokens.error_description || ''}`);
     }
 
-    // Store the new tokens. AM may rotate the refresh token.
     await storeApprovalMaxToken(tokens);
     console.log('Token refreshed successfully');
     return tokens.access_token;
@@ -148,6 +147,17 @@ async function getApprovalMaxToken() {
     return null;
 }
 
+// Helper for /api/* endpoints - ensures we have a valid token or throws
+async function requireToken() {
+    const tok = await getApprovalMaxToken();
+    if (!tok) {
+        const err = new Error('No valid access token - please authenticate');
+        err.status = 401;
+        throw err;
+    }
+    return tok;
+}
+
 // Middleware
 app.use(express.json());
 app.use(express.static('public'));
@@ -184,6 +194,7 @@ app.get('/', (req, res) => {
             margin: 20px 0;
         }
         .section h3 { margin-top: 0; color: #4a5568; }
+        .section h4 { color: #4a5568; margin-top: 16px; margin-bottom: 8px; }
         .status {
             padding: 12px;
             border-radius: 6px;
@@ -205,6 +216,8 @@ app.get('/', (req, res) => {
         }
         button:hover { background: #6A4C93; }
         button:disabled { background: #9ca3af; cursor: not-allowed; }
+        button.secondary { background: #64748b; }
+        button.secondary:hover { background: #475569; }
         .result {
             background: #1f2937;
             color: #f9fafb;
@@ -213,7 +226,7 @@ app.get('/', (req, res) => {
             font-family: monospace;
             font-size: 12px;
             white-space: pre-wrap;
-            max-height: 400px;
+            max-height: 500px;
             overflow-y: auto;
             margin: 10px 0;
         }
@@ -224,6 +237,8 @@ app.get('/', (req, res) => {
             margin: 15px 0;
         }
         .highlight { background: #fef3c7; padding: 2px 4px; border-radius: 3px; }
+        .company-picker { margin: 10px 0; }
+        .company-picker select { padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 14px; width: 100%; max-width: 500px; }
     </style>
 </head>
 <body>
@@ -246,35 +261,49 @@ app.get('/', (req, res) => {
 
         <div class="section">
             <h3>Step 1: Authentication</h3>
-            <p>Runs the ApprovalMax OAuth flow. Tokens now persist in the database and auto-refresh before expiry.</p>
+            <p>Runs the ApprovalMax OAuth flow. Tokens persist in the database and auto-refresh before expiry.</p>
             <button onclick="startAuth()">Start ApprovalMax Authentication</button>
             <div id="authResult"></div>
         </div>
 
         <div class="section">
-            <h3>Step 2: API Data Testing</h3>
-            <p>Once authenticated, test the endpoints:</p>
+            <h3>Step 2: Real API Endpoints</h3>
+            <p>These hit the <span class="highlight">real</span> ApprovalMax endpoints using the AM client module.</p>
 
+            <h4>Companies</h4>
             <div class="button-grid">
-                <button onclick="testEndpoint('/companies')" disabled id="btn-companies">Test Companies</button>
-                <button onclick="testEndpoint('/documents')" disabled id="btn-documents">Test Documents</button>
-                <button onclick="testEndpoint('/purchase-orders')" disabled id="btn-pos">Test Purchase Orders</button>
-                <button onclick="testEndpoint('/bills')" disabled id="btn-bills">Test Bills</button>
+                <button onclick="callApi('/api/companies')" disabled id="btn-api-companies">GET /api/companies</button>
+            </div>
+
+            <h4>Pending approvals across ALL entities (consolidated)</h4>
+            <div class="button-grid">
+                <button onclick="callApi('/api/requests/all')" disabled id="btn-api-all">GET /api/requests/all</button>
+                <button onclick="callApi('/api/requests/all?status=Approved')" disabled id="btn-api-all-approved">GET /api/requests/all (Approved)</button>
+            </div>
+
+            <h4>Requests for a single entity</h4>
+            <div class="company-picker">
+                <select id="companyPicker">
+                    <option value="">Select entity...</option>
+                </select>
+            </div>
+            <div class="button-grid">
+                <button onclick="callCompanyApi()" disabled id="btn-api-company-requests">GET /api/requests/:selected</button>
             </div>
 
             <div id="apiResult"></div>
         </div>
 
         <div class="section">
-            <h3>Debug Information</h3>
-            <p>View the current token state held in the database.</p>
-            <button onclick="showDebugInfo()">Show Debug Info</button>
+            <h3>Debug / Token State</h3>
+            <button onclick="showDebugInfo()">Show DB Token State</button>
             <div id="debugInfo"></div>
         </div>
     </div>
 
     <script>
         let isAuthenticated = false;
+        let companies = [];
 
         function startAuth() {
             fetch('/auth/start')
@@ -295,9 +324,9 @@ app.get('/', (req, res) => {
                 });
         }
 
-        function testEndpoint(endpoint) {
+        function callApi(path) {
             showLoading('apiResult');
-            fetch('/test' + endpoint)
+            fetch(path)
                 .then(r => r.json())
                 .then(data => {
                     document.getElementById('apiResult').innerHTML =
@@ -307,6 +336,17 @@ app.get('/', (req, res) => {
                     document.getElementById('apiResult').innerHTML =
                         '<div class="status disconnected">Error: ' + err.message + '</div>';
                 });
+        }
+
+        function callCompanyApi() {
+            const picker = document.getElementById('companyPicker');
+            const companyId = picker.value;
+            if (!companyId) {
+                document.getElementById('apiResult').innerHTML =
+                    '<div class="status pending">Select an entity first.</div>';
+                return;
+            }
+            callApi('/api/requests/' + companyId);
         }
 
         function showDebugInfo() {
@@ -324,8 +364,21 @@ app.get('/', (req, res) => {
         }
 
         function enableButtons() {
-            ['btn-companies', 'btn-documents', 'btn-pos', 'btn-bills'].forEach(id => {
-                document.getElementById(id).disabled = false;
+            ['btn-api-companies', 'btn-api-all', 'btn-api-all-approved', 'btn-api-company-requests']
+                .forEach(id => {
+                    const btn = document.getElementById(id);
+                    if (btn) btn.disabled = false;
+                });
+        }
+
+        function populateCompanyPicker(orgs) {
+            const picker = document.getElementById('companyPicker');
+            picker.innerHTML = '<option value="">Select entity...</option>';
+            orgs.forEach(org => {
+                const opt = document.createElement('option');
+                opt.value = org.companyId || org.id;
+                opt.textContent = org.name;
+                picker.appendChild(opt);
             });
         }
 
@@ -340,6 +393,16 @@ app.get('/', (req, res) => {
                         'Valid - expires ' + (data.expiresAt ? new Date(data.expiresAt).toLocaleString() : 'unknown');
                     enableButtons();
                     isAuthenticated = true;
+
+                    fetch('/api/companies')
+                        .then(r => r.json())
+                        .then(response => {
+                            if (response.success && response.data) {
+                                companies = Array.isArray(response.data) ? response.data : [];
+                                populateCompanyPicker(companies);
+                            }
+                        })
+                        .catch(() => {});
                 } else {
                     document.getElementById('tokenStatus').textContent = 'No token in DB';
                 }
@@ -389,7 +452,6 @@ app.get('/callback/approvalmax', async (req, res) => {
         if (!code) {
             return res.status(400).send(`
                 <h1>No Authorization Code</h1>
-                <p>ApprovalMax did not provide an authorization code.</p>
                 <a href="/">Back to Home</a>
             `);
         }
@@ -418,24 +480,13 @@ app.get('/callback/approvalmax', async (req, res) => {
             `);
         }
 
-        // Fetch company list with the new token so we can persist orgs alongside the token
         let organizations = null;
         try {
-            const companiesResp = await fetch(`${APPROVALMAX_CONFIG.baseUrl}/companies`, {
-                headers: {
-                    'Authorization': `Bearer ${tokens.access_token}`,
-                    'Accept': 'application/json'
-                }
-            });
-            if (companiesResp.ok) {
-                const companiesData = await companiesResp.json();
-                organizations = Array.isArray(companiesData) ? companiesData : (companiesData.data || null);
-                console.log('Retrieved', organizations ? organizations.length : 0, 'organizations');
-            } else {
-                console.warn('Could not fetch companies list on callback');
-            }
+            const companiesData = await amClient.getCompanies(tokens.access_token);
+            organizations = Array.isArray(companiesData) ? companiesData : (companiesData?.data || null);
+            console.log('Retrieved', organizations ? organizations.length : 0, 'organizations');
         } catch (e) {
-            console.warn('Error fetching companies on callback:', e.message);
+            console.warn('Could not fetch companies on callback:', e.message);
         }
 
         await storeApprovalMaxToken(tokens, organizations);
@@ -488,67 +539,150 @@ app.get('/auth/status', async (req, res) => {
     }
 });
 
-// API helper (DB-backed with auto-refresh)
-async function makeApiRequest(endpoint, options = {}) {
-    const tokenRecord = await getApprovalMaxToken();
-    if (!tokenRecord) {
-        throw new Error('No valid access token - please authenticate');
-    }
+// ═════════════════════════════════════════════════════════════════════════
+// REAL API ENDPOINTS - using approvalmax-client against correct AM paths
+// ═════════════════════════════════════════════════════════════════════════
 
-    const url = `${APPROVALMAX_CONFIG.baseUrl}${endpoint}`;
-    const response = await fetch(url, {
-        ...options,
-        headers: {
-            'Authorization': `Bearer ${tokenRecord.access_token}`,
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-            ...(options.headers || {})
+// GET /api/companies - list all organisations the token can access
+app.get('/api/companies', async (req, res) => {
+    try {
+        const tok = await requireToken();
+        const data = await amClient.getCompanies(tok.access_token);
+        const list = Array.isArray(data) ? data : (data?.data || []);
+        res.json({
+            success: true,
+            count: list.length,
+            data: list
+        });
+    } catch (error) {
+        res.status(error.status || 500).json({
+            success: false,
+            error: error.message,
+            body: error.body || null
+        });
+    }
+});
+
+// GET /api/requests/:companyId - requests for a single company
+// Query params: ?status=OnApproval (default) ?limit=100
+app.get('/api/requests/:companyId', async (req, res) => {
+    try {
+        const tok = await requireToken();
+        const status = req.query.status || 'OnApproval';
+        const limit = Number(req.query.limit || 100);
+        const continuationToken = req.query.continuationToken;
+
+        const data = await amClient.getRequests(tok.access_token, req.params.companyId, {
+            status,
+            limit,
+            continuationToken
+        });
+
+        let items = [];
+        let nextToken = null;
+        if (Array.isArray(data)) {
+            items = data;
+        } else if (data && typeof data === 'object') {
+            items = data.items || data.data || [];
+            nextToken = data.continuationToken || null;
         }
-    });
 
-    const data = await response.json();
-
-    if (!response.ok) {
-        throw new Error(`API Error: ${response.status} - ${data.error || data.message || 'Unknown error'}`);
-    }
-
-    return { status: response.status, data, headers: response.headers };
-}
-
-// Test endpoints (legacy test paths - most will 404 against real AM, kept for reference)
-app.get('/test/companies', async (req, res) => {
-    try {
-        const result = await makeApiRequest('/companies');
-        res.json({ success: true, endpoint: '/companies', ...result });
+        res.json({
+            success: true,
+            companyId: req.params.companyId,
+            status,
+            count: items.length,
+            continuationToken: nextToken,
+            data: items,
+            raw: data
+        });
     } catch (error) {
-        res.json({ success: false, endpoint: '/companies', error: error.message });
-    }
-});
-
-app.get('/test/documents', async (req, res) => {
-    try {
-        const result = await makeApiRequest('/documents?limit=20');
-        res.json({ success: true, endpoint: '/documents', count: result.data?.length || 0, ...result });
-    } catch (error) {
-        res.json({ success: false, endpoint: '/documents', error: error.message });
+        res.status(error.status || 500).json({
+            success: false,
+            companyId: req.params.companyId,
+            error: error.message,
+            body: error.body || null
+        });
     }
 });
 
-app.get('/test/purchase-orders', async (req, res) => {
+// GET /api/requests/all - consolidated view across ALL entities
+app.get('/api/requests/all', async (req, res) => {
     try {
-        const result = await makeApiRequest('/purchase-orders?limit=20');
-        res.json({ success: true, endpoint: '/purchase-orders', count: result.data?.length || 0, ...result });
+        const tok = await requireToken();
+        const status = req.query.status || 'OnApproval';
+
+        let companies = Array.isArray(tok.organizations) ? tok.organizations : [];
+
+        if (companies.length === 0) {
+            const fresh = await amClient.getCompanies(tok.access_token);
+            companies = Array.isArray(fresh) ? fresh : (fresh?.data || []);
+        }
+
+        const byCompany = [];
+        let totalCount = 0;
+
+        for (const company of companies) {
+            const companyId = company.companyId || company.id;
+            const companyName = company.name || 'Unknown';
+            try {
+                const data = await amClient.getRequests(tok.access_token, companyId, { status, limit: 100 });
+                let items = [];
+                if (Array.isArray(data)) {
+                    items = data;
+                } else if (data && typeof data === 'object') {
+                    items = data.items || data.data || [];
+                }
+                totalCount += items.length;
+                byCompany.push({
+                    companyId,
+                    companyName,
+                    count: items.length,
+                    requests: items
+                });
+            } catch (err) {
+                byCompany.push({
+                    companyId,
+                    companyName,
+                    error: err.message,
+                    status: err.status || null
+                });
+            }
+        }
+
+        res.json({
+            success: true,
+            status,
+            entityCount: companies.length,
+            totalRequests: totalCount,
+            byCompany
+        });
     } catch (error) {
-        res.json({ success: false, endpoint: '/purchase-orders', error: error.message });
+        res.status(error.status || 500).json({
+            success: false,
+            error: error.message
+        });
     }
 });
 
-app.get('/test/bills', async (req, res) => {
+// GET /api/debug/raw/:companyId - raw passthrough for reconciliation
+app.get('/api/debug/raw/:companyId', async (req, res) => {
     try {
-        const result = await makeApiRequest('/bills?limit=20');
-        res.json({ success: true, endpoint: '/bills', count: result.data?.length || 0, ...result });
+        const tok = await requireToken();
+        const subPath = req.query.path || 'requests';
+        const fullPath = `/companies/${req.params.companyId}/${subPath}`;
+        const data = await amClient.rawGet(tok.access_token, fullPath);
+        res.json({
+            success: true,
+            requestedPath: fullPath,
+            data
+        });
     } catch (error) {
-        res.json({ success: false, endpoint: '/bills', error: error.message });
+        res.status(error.status || 500).json({
+            success: false,
+            error: error.message,
+            body: error.body || null
+        });
     }
 });
 
