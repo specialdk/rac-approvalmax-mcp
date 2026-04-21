@@ -1,4 +1,4 @@
-// ApprovalMax API Data Tester - OAuth + DB-backed token persistence + real API endpoints
+// ApprovalMax API Data Tester - OAuth + DB persistence + real Xero endpoints
 // File: server.js
 
 const express = require('express');
@@ -9,7 +9,6 @@ const amClient = require('./approvalmax-client');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// ApprovalMax Configuration
 const APPROVALMAX_CONFIG = {
     clientId: process.env.APPROVALMAX_CLIENT_ID || '2A81A6DEEAA244C188D518BA59601780',
     clientSecret: process.env.APPROVALMAX_CLIENT_SECRET || '',
@@ -26,7 +25,11 @@ const APPROVALMAX_CONFIG = {
 
 const INTEGRATION_KEY = 'approvalmax_integration';
 
-// Postgres connection pool
+// The core Xero types we fetch for cross-entity aggregation
+// Kept short intentionally - expand if needed for specific reporting
+const DEFAULT_XERO_TYPES_FOR_AGGREGATION = ['purchase-orders', 'bills'];
+
+// Postgres pool
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
@@ -36,7 +39,6 @@ pool.on('error', (err) => {
     console.error('Unexpected DB pool error:', err.message);
 });
 
-// Auto-migration on startup
 async function ensureSchema() {
     try {
         await pool.query(`
@@ -58,7 +60,6 @@ async function ensureSchema() {
     }
 }
 
-// Token storage helpers
 async function storeApprovalMaxToken(tokens, organizations = null) {
     const expiresAt = Date.now() + (tokens.expires_in * 1000);
     const orgsJson = organizations ? JSON.stringify(organizations) : null;
@@ -82,7 +83,6 @@ async function storeApprovalMaxToken(tokens, organizations = null) {
 
 async function refreshApprovalMaxToken(refreshToken) {
     console.log('Refreshing ApprovalMax access token...');
-
     const response = await fetch(APPROVALMAX_CONFIG.tokenUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -95,7 +95,6 @@ async function refreshApprovalMaxToken(refreshToken) {
     });
 
     const tokens = await response.json();
-
     if (!response.ok) {
         console.error('Refresh failed:', tokens);
         throw new Error(`Refresh failed: ${tokens.error || 'unknown'} - ${tokens.error_description || ''}`);
@@ -112,16 +111,13 @@ async function getApprovalMaxToken() {
         [INTEGRATION_KEY]
     );
 
-    if (result.rows.length === 0) {
-        return null;
-    }
+    if (result.rows.length === 0) return null;
 
     const row = result.rows[0];
-    const now = Date.now();
     const expiresAt = Number(row.expires_at);
     const fiveMinutes = 5 * 60 * 1000;
 
-    if (expiresAt > now + fiveMinutes) {
+    if (expiresAt > Date.now() + fiveMinutes) {
         return {
             access_token: row.access_token,
             expires_at: expiresAt,
@@ -138,16 +134,15 @@ async function getApprovalMaxToken() {
                 organizations: row.organizations
             };
         } catch (err) {
-            console.error('Refresh failed, token is unusable:', err.message);
+            console.error('Refresh failed, token unusable:', err.message);
             return null;
         }
     }
 
-    console.warn('Token expired and no refresh_token available - user must re-consent');
+    console.warn('Token expired and no refresh_token - user must re-consent');
     return null;
 }
 
-// Helper for /api/* endpoints - ensures we have a valid token or throws
 async function requireToken() {
     const tok = await getApprovalMaxToken();
     if (!tok) {
@@ -162,13 +157,15 @@ async function requireToken() {
 app.use(express.json());
 app.use(express.static('public'));
 
+// ────────────────────────────────────────────────────────────────────────
 // Homepage
+// ────────────────────────────────────────────────────────────────────────
 app.get('/', (req, res) => {
     res.send(`
 <!DOCTYPE html>
 <html>
 <head>
-    <title>ApprovalMax API Data Tester</title>
+    <title>RAC ApprovalMax Dashboard - API Data Tester</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body {
@@ -216,8 +213,6 @@ app.get('/', (req, res) => {
         }
         button:hover { background: #6A4C93; }
         button:disabled { background: #9ca3af; cursor: not-allowed; }
-        button.secondary { background: #64748b; }
-        button.secondary:hover { background: #475569; }
         .result {
             background: #1f2937;
             color: #f9fafb;
@@ -232,25 +227,54 @@ app.get('/', (req, res) => {
         }
         .button-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
             gap: 10px;
             margin: 15px 0;
         }
+        .control-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            margin: 10px 0;
+        }
+        .control-row label { font-weight: 500; color: #4a5568; min-width: 90px; }
+        .control-row select {
+            padding: 8px;
+            border-radius: 6px;
+            border: 1px solid #cbd5e1;
+            font-size: 14px;
+            flex: 1;
+            min-width: 200px;
+        }
         .highlight { background: #fef3c7; padding: 2px 4px; border-radius: 3px; }
-        .company-picker { margin: 10px 0; }
-        .company-picker select { padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 14px; width: 100%; max-width: 500px; }
+        .kpi-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
+            margin: 15px 0;
+        }
+        .kpi-card {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 16px;
+            text-align: center;
+        }
+        .kpi-card .num { font-size: 24px; font-weight: 700; color: #8B5A96; }
+        .kpi-card .label { font-size: 12px; color: #64748b; margin-top: 4px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>ApprovalMax API Data Tester</h1>
+        <h1>RAC ApprovalMax Dashboard - API Data Tester</h1>
 
         <div class="section">
             <h3>Connection Status</h3>
             <div id="connectionStatus" class="status disconnected">
                 Not Connected - Need to authenticate first
             </div>
-            <p><strong>Current Setup:</strong></p>
+            <p><strong>Setup:</strong></p>
             <ul>
                 <li>Client ID: ${APPROVALMAX_CONFIG.clientId}</li>
                 <li>Redirect URI: ${APPROVALMAX_CONFIG.redirectUri}</li>
@@ -261,41 +285,58 @@ app.get('/', (req, res) => {
 
         <div class="section">
             <h3>Step 1: Authentication</h3>
-            <p>Runs the ApprovalMax OAuth flow. Tokens persist in the database and auto-refresh before expiry.</p>
+            <p>Runs the ApprovalMax OAuth flow. Tokens persist and auto-refresh before expiry.</p>
             <button onclick="startAuth()">Start ApprovalMax Authentication</button>
             <div id="authResult"></div>
         </div>
 
         <div class="section">
-            <h3>Step 2: Real API Endpoints</h3>
-            <p>These hit the <span class="highlight">real</span> ApprovalMax endpoints using the AM client module.</p>
+            <h3>Step 2: Xero Request Data</h3>
+            <p>Hits the real AM endpoints: <code>/api/v1/companies/{id}/xero/{type}</code></p>
 
-            <h4>Companies</h4>
-            <div class="button-grid">
-                <button onclick="callApi('/api/companies')" disabled id="btn-api-companies">GET /api/companies</button>
-            </div>
-
-            <h4>Pending approvals across ALL entities (consolidated)</h4>
-            <div class="button-grid">
-                <button onclick="callApi('/api/requests/all')" disabled id="btn-api-all">GET /api/requests/all</button>
-                <button onclick="callApi('/api/requests/all?status=Approved')" disabled id="btn-api-all-approved">GET /api/requests/all (Approved)</button>
-            </div>
-
-            <h4>Requests for a single entity</h4>
-            <div class="company-picker">
-                <select id="companyPicker">
-                    <option value="">Select entity...</option>
+            <div class="control-row">
+                <label for="typePicker">Request type:</label>
+                <select id="typePicker">
+                    <option value="purchase-orders" selected>purchase-orders</option>
+                    <option value="bills">bills</option>
+                    <option value="credit-notes">credit-notes</option>
+                    <option value="sales-invoices">sales-invoices</option>
+                    <option value="batch-payments">batch-payments</option>
+                    <option value="quotes">quotes</option>
                 </select>
             </div>
-            <div class="button-grid">
-                <button onclick="callCompanyApi()" disabled id="btn-api-company-requests">GET /api/requests/:selected</button>
+
+            <div class="control-row">
+                <label for="statusPicker">Request status:</label>
+                <select id="statusPicker">
+                    <option value="OnApproval" selected>OnApproval (pending)</option>
+                    <option value="Approved">Approved</option>
+                    <option value="Rejected">Rejected</option>
+                    <option value="Draft">Draft</option>
+                    <option value="">(no filter - all)</option>
+                </select>
             </div>
 
+            <div class="control-row">
+                <label for="companyPicker">Entity:</label>
+                <select id="companyPicker">
+                    <option value="">(all entities)</option>
+                </select>
+            </div>
+
+            <h4>Actions</h4>
+            <div class="button-grid">
+                <button onclick="callApi('/api/companies')" disabled id="btn-api-companies">GET /api/companies</button>
+                <button onclick="fetchCrossEntitySummary()" disabled id="btn-summary">Cross-entity summary (POs + Bills, all 5 orgs)</button>
+                <button onclick="fetchXeroByType()" disabled id="btn-xero-type">Fetch by type (uses selectors above)</button>
+            </div>
+
+            <div id="kpiRow"></div>
             <div id="apiResult"></div>
         </div>
 
         <div class="section">
-            <h3>Debug / Token State</h3>
+            <h3>Debug</h3>
             <button onclick="showDebugInfo()">Show DB Token State</button>
             <div id="debugInfo"></div>
         </div>
@@ -315,7 +356,7 @@ app.get('/', (req, res) => {
                         window.location.href = data.authUrl;
                     } else {
                         document.getElementById('authResult').innerHTML =
-                            '<div class="status disconnected">Error: ' + (data.error || 'Failed to generate auth URL') + '</div>';
+                            '<div class="status disconnected">Error: ' + (data.error || 'Failed') + '</div>';
                     }
                 })
                 .catch(err => {
@@ -326,6 +367,7 @@ app.get('/', (req, res) => {
 
         function callApi(path) {
             showLoading('apiResult');
+            document.getElementById('kpiRow').innerHTML = '';
             fetch(path)
                 .then(r => r.json())
                 .then(data => {
@@ -338,15 +380,46 @@ app.get('/', (req, res) => {
                 });
         }
 
-        function callCompanyApi() {
-            const picker = document.getElementById('companyPicker');
-            const companyId = picker.value;
-            if (!companyId) {
-                document.getElementById('apiResult').innerHTML =
-                    '<div class="status pending">Select an entity first.</div>';
-                return;
+        function fetchXeroByType() {
+            const type = document.getElementById('typePicker').value;
+            const status = document.getElementById('statusPicker').value;
+            const companyId = document.getElementById('companyPicker').value;
+            const statusParam = status ? '&requestStatus=' + encodeURIComponent(status) : '';
+            if (companyId) {
+                callApi('/api/xero/' + type + '/' + companyId + '?limit=100' + statusParam);
+            } else {
+                callApi('/api/xero/' + type + '?limit=100' + statusParam);
             }
-            callApi('/api/requests/' + companyId);
+        }
+
+        function fetchCrossEntitySummary() {
+            const status = document.getElementById('statusPicker').value;
+            const statusParam = status ? '?requestStatus=' + encodeURIComponent(status) : '';
+            showLoading('apiResult');
+            document.getElementById('kpiRow').innerHTML = '';
+            fetch('/api/xero/summary' + statusParam)
+                .then(r => r.json())
+                .then(data => {
+                    renderSummaryKPIs(data);
+                    document.getElementById('apiResult').innerHTML =
+                        '<div class="result">' + JSON.stringify(data, null, 2) + '</div>';
+                })
+                .catch(err => {
+                    document.getElementById('apiResult').innerHTML =
+                        '<div class="status disconnected">Error: ' + err.message + '</div>';
+                });
+        }
+
+        function renderSummaryKPIs(data) {
+            if (!data || !data.success) return;
+            const html =
+                '<div class="kpi-row">' +
+                '<div class="kpi-card"><div class="num">' + (data.totalCount || 0) + '</div><div class="label">Total ' + data.requestStatus + '</div></div>' +
+                '<div class="kpi-card"><div class="num">' + (data.totalsByType?.['purchase-orders'] || 0) + '</div><div class="label">Purchase Orders</div></div>' +
+                '<div class="kpi-card"><div class="num">' + (data.totalsByType?.['bills'] || 0) + '</div><div class="label">Bills</div></div>' +
+                '<div class="kpi-card"><div class="num">' + (data.entityCount || 0) + '</div><div class="label">Entities</div></div>' +
+                '</div>';
+            document.getElementById('kpiRow').innerHTML = html;
         }
 
         function showDebugInfo() {
@@ -364,16 +437,15 @@ app.get('/', (req, res) => {
         }
 
         function enableButtons() {
-            ['btn-api-companies', 'btn-api-all', 'btn-api-all-approved', 'btn-api-company-requests']
-                .forEach(id => {
-                    const btn = document.getElementById(id);
-                    if (btn) btn.disabled = false;
-                });
+            ['btn-api-companies', 'btn-summary', 'btn-xero-type'].forEach(id => {
+                const btn = document.getElementById(id);
+                if (btn) btn.disabled = false;
+            });
         }
 
         function populateCompanyPicker(orgs) {
             const picker = document.getElementById('companyPicker');
-            picker.innerHTML = '<option value="">Select entity...</option>';
+            picker.innerHTML = '<option value="">(all entities)</option>';
             orgs.forEach(org => {
                 const opt = document.createElement('option');
                 opt.value = org.companyId || org.id;
@@ -416,7 +488,9 @@ app.get('/', (req, res) => {
     `);
 });
 
-// OAuth: start
+// ────────────────────────────────────────────────────────────────────────
+// OAuth endpoints
+// ────────────────────────────────────────────────────────────────────────
 app.get('/auth/start', (req, res) => {
     try {
         const state = Math.random().toString(36).substring(2, 15);
@@ -427,33 +501,22 @@ app.get('/auth/start', (req, res) => {
             redirect_uri: APPROVALMAX_CONFIG.redirectUri,
             state: state
         });
-        const authUrl = `${APPROVALMAX_CONFIG.authUrl}?${params.toString()}`;
-        res.json({ authUrl });
+        res.json({ authUrl: `${APPROVALMAX_CONFIG.authUrl}?${params.toString()}` });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 });
 
-// OAuth: callback (DB-backed)
 app.get('/callback/approvalmax', async (req, res) => {
     try {
         const { code, state, error } = req.query;
         console.log('ApprovalMax callback received:', { code: !!code, state, error });
 
         if (error) {
-            return res.status(400).send(`
-                <h1>ApprovalMax Authorization Failed</h1>
-                <p>Error: ${error}</p>
-                <p>Description: ${req.query.error_description || 'No description provided'}</p>
-                <a href="/">Back to Home</a>
-            `);
+            return res.status(400).send(`<h1>ApprovalMax Authorization Failed</h1><p>Error: ${error}</p><a href="/">Back to Home</a>`);
         }
-
         if (!code) {
-            return res.status(400).send(`
-                <h1>No Authorization Code</h1>
-                <a href="/">Back to Home</a>
-            `);
+            return res.status(400).send(`<h1>No Authorization Code</h1><a href="/">Back to Home</a>`);
         }
 
         const tokenResponse = await fetch(APPROVALMAX_CONFIG.tokenUrl, {
@@ -469,15 +532,9 @@ app.get('/callback/approvalmax', async (req, res) => {
         });
 
         const tokens = await tokenResponse.json();
-
         if (!tokenResponse.ok) {
             console.error('Token exchange failed:', tokens);
-            return res.status(400).send(`
-                <h1>Token Exchange Failed</h1>
-                <p>Error: ${tokens.error}</p>
-                <p>Description: ${tokens.error_description || 'No description provided'}</p>
-                <a href="/">Back to Home</a>
-            `);
+            return res.status(400).send(`<h1>Token Exchange Failed</h1><p>Error: ${tokens.error}</p><a href="/">Back to Home</a>`);
         }
 
         let organizations = null;
@@ -494,24 +551,15 @@ app.get('/callback/approvalmax', async (req, res) => {
         const orgCount = organizations ? organizations.length : 0;
         res.send(`
             <h1>ApprovalMax Authentication Successful</h1>
-            <p>Access token obtained and persisted to database</p>
-            <p>${orgCount} organisation(s) linked</p>
-            <p>Refresh token stored - will auto-refresh before expiry</p>
-            <p>Redirecting back to the tester in 3 seconds...</p>
+            <p>Access token stored in DB. ${orgCount} organisation(s) linked. Refresh token ready.</p>
             <script>setTimeout(() => { window.location.href = '/'; }, 3000);</script>
         `);
-
     } catch (error) {
         console.error('Callback error:', error);
-        res.status(500).send(`
-            <h1>Server Error</h1>
-            <p>Error: ${error.message}</p>
-            <a href="/">Back to Home</a>
-        `);
+        res.status(500).send(`<h1>Server Error</h1><p>Error: ${error.message}</p><a href="/">Back to Home</a>`);
     }
 });
 
-// Auth status (DB-backed)
 app.get('/auth/status', async (req, res) => {
     try {
         const result = await pool.query(
@@ -519,9 +567,7 @@ app.get('/auth/status', async (req, res) => {
             [INTEGRATION_KEY]
         );
 
-        if (result.rows.length === 0) {
-            return res.json({ authenticated: false });
-        }
+        if (result.rows.length === 0) return res.json({ authenticated: false });
 
         const row = result.rows[0];
         const expiresAt = Number(row.expires_at);
@@ -540,39 +586,88 @@ app.get('/auth/status', async (req, res) => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════
-// REAL API ENDPOINTS - using approvalmax-client against correct AM paths
-// ORDER MATTERS: static routes BEFORE parameterized (:companyId) wildcards
+// REAL API ENDPOINTS - Xero-typed, using approvalmax-client
 // ═════════════════════════════════════════════════════════════════════════
 
-// GET /api/companies - list all organisations the token can access
+// GET /api/companies - list the organisations
 app.get('/api/companies', async (req, res) => {
     try {
         const tok = await requireToken();
         const data = await amClient.getCompanies(tok.access_token);
         const list = Array.isArray(data) ? data : (data?.data || []);
-        res.json({
-            success: true,
-            count: list.length,
-            data: list
-        });
+        res.json({ success: true, count: list.length, data: list });
     } catch (error) {
-        res.status(error.status || 500).json({
-            success: false,
-            error: error.message,
-            body: error.body || null
-        });
+        res.status(error.status || 500).json({ success: false, error: error.message, body: error.body || null });
     }
 });
 
-// GET /api/requests/all - consolidated view across ALL entities
-// MUST be defined BEFORE /api/requests/:companyId or Express matches :companyId='all'
-app.get('/api/requests/all', async (req, res) => {
+// GET /api/xero/summary - cross-entity KPI summary (POs + Bills across all 5 orgs)
+// Query: ?requestStatus=OnApproval (default)
+app.get('/api/xero/summary', async (req, res) => {
     try {
         const tok = await requireToken();
-        const status = req.query.status || 'OnApproval';
+        const requestStatus = req.query.requestStatus === undefined
+            ? 'OnApproval'
+            : (req.query.requestStatus || undefined); // empty string means no filter
 
         let companies = Array.isArray(tok.organizations) ? tok.organizations : [];
+        if (companies.length === 0) {
+            const fresh = await amClient.getCompanies(tok.access_token);
+            companies = Array.isArray(fresh) ? fresh : (fresh?.data || []);
+        }
 
+        const byCompany = [];
+        const totalsByType = {};
+        let totalCount = 0;
+
+        for (const company of companies) {
+            const companyId = company.companyId || company.id;
+            const companyName = company.name || 'Unknown';
+            const entry = { companyId, companyName, counts: {}, totalForCompany: 0 };
+
+            for (const xeroType of DEFAULT_XERO_TYPES_FOR_AGGREGATION) {
+                try {
+                    const result = await amClient.getXeroRequests(tok.access_token, companyId, xeroType, {
+                        requestStatus,
+                        limit: 100
+                    });
+                    const count = result.items.length;
+                    entry.counts[xeroType] = count;
+                    entry.totalForCompany += count;
+                    totalsByType[xeroType] = (totalsByType[xeroType] || 0) + count;
+                    totalCount += count;
+                } catch (err) {
+                    entry.counts[xeroType] = { error: err.message, status: err.status || null };
+                }
+            }
+
+            byCompany.push(entry);
+        }
+
+        res.json({
+            success: true,
+            requestStatus: requestStatus || 'ALL',
+            entityCount: companies.length,
+            totalCount,
+            totalsByType,
+            typesFetched: DEFAULT_XERO_TYPES_FOR_AGGREGATION,
+            byCompany
+        });
+    } catch (error) {
+        res.status(error.status || 500).json({ success: false, error: error.message });
+    }
+});
+
+// GET /api/xero/:type - single type across ALL entities
+// Must come BEFORE /api/xero/:type/:companyId so Express matches correctly
+app.get('/api/xero/:type', async (req, res) => {
+    try {
+        const tok = await requireToken();
+        const xeroType = req.params.type;
+        const requestStatus = req.query.requestStatus || undefined;
+        const limit = Number(req.query.limit || 100);
+
+        let companies = Array.isArray(tok.organizations) ? tok.organizations : [];
         if (companies.length === 0) {
             const fresh = await amClient.getCompanies(tok.access_token);
             companies = Array.isArray(fresh) ? fresh : (fresh?.data || []);
@@ -585,81 +680,71 @@ app.get('/api/requests/all', async (req, res) => {
             const companyId = company.companyId || company.id;
             const companyName = company.name || 'Unknown';
             try {
-                const data = await amClient.getRequests(tok.access_token, companyId, { status, limit: 100 });
-                let items = [];
-                if (Array.isArray(data)) {
-                    items = data;
-                } else if (data && typeof data === 'object') {
-                    items = data.items || data.data || [];
-                }
-                totalCount += items.length;
+                const result = await amClient.getXeroRequests(tok.access_token, companyId, xeroType, {
+                    requestStatus,
+                    limit
+                });
+                totalCount += result.items.length;
                 byCompany.push({
                     companyId,
                     companyName,
-                    count: items.length,
-                    requests: items
+                    count: result.items.length,
+                    continuationToken: result.continuationToken,
+                    items: result.items
                 });
             } catch (err) {
                 byCompany.push({
                     companyId,
                     companyName,
                     error: err.message,
-                    status: err.status || null
+                    status: err.status || null,
+                    body: err.body || null
                 });
             }
         }
 
         res.json({
             success: true,
-            status,
+            xeroType,
+            requestStatus: requestStatus || 'ALL',
             entityCount: companies.length,
-            totalRequests: totalCount,
+            totalCount,
             byCompany
         });
     } catch (error) {
-        res.status(error.status || 500).json({
-            success: false,
-            error: error.message
-        });
+        res.status(error.status || 500).json({ success: false, error: error.message });
     }
 });
 
-// GET /api/requests/:companyId - requests for a single company
-// Query params: ?status=OnApproval (default) ?limit=100
-app.get('/api/requests/:companyId', async (req, res) => {
+// GET /api/xero/:type/:companyId - single type for a single entity
+app.get('/api/xero/:type/:companyId', async (req, res) => {
     try {
         const tok = await requireToken();
-        const status = req.query.status || 'OnApproval';
+        const xeroType = req.params.type;
+        const companyId = req.params.companyId;
+        const requestStatus = req.query.requestStatus || undefined;
         const limit = Number(req.query.limit || 100);
         const continuationToken = req.query.continuationToken;
 
-        const data = await amClient.getRequests(tok.access_token, req.params.companyId, {
-            status,
+        const result = await amClient.getXeroRequests(tok.access_token, companyId, xeroType, {
+            requestStatus,
             limit,
             continuationToken
         });
 
-        let items = [];
-        let nextToken = null;
-        if (Array.isArray(data)) {
-            items = data;
-        } else if (data && typeof data === 'object') {
-            items = data.items || data.data || [];
-            nextToken = data.continuationToken || null;
-        }
-
         res.json({
             success: true,
-            companyId: req.params.companyId,
-            status,
-            count: items.length,
-            continuationToken: nextToken,
-            data: items,
-            raw: data
+            xeroType,
+            companyId,
+            requestStatus: requestStatus || 'ALL',
+            count: result.items.length,
+            continuationToken: result.continuationToken,
+            items: result.items
         });
     } catch (error) {
         res.status(error.status || 500).json({
             success: false,
+            xeroType: req.params.type,
             companyId: req.params.companyId,
             error: error.message,
             body: error.body || null
@@ -667,28 +752,26 @@ app.get('/api/requests/:companyId', async (req, res) => {
     }
 });
 
-// GET /api/debug/raw/:companyId - raw passthrough for reconciliation
-app.get('/api/debug/raw/:companyId', async (req, res) => {
+// GET /api/debug/raw?companyId=...&path=... - raw passthrough for reconciliation
+app.get('/api/debug/raw', async (req, res) => {
     try {
         const tok = await requireToken();
-        const subPath = req.query.path || 'requests';
-        const fullPath = `/companies/${req.params.companyId}/${subPath}`;
+        const companyId = req.query.companyId;
+        const subPath = req.query.path || 'xero/purchase-orders';
+        if (!companyId) {
+            return res.status(400).json({ success: false, error: 'companyId query param required' });
+        }
+        const fullPath = `/companies/${companyId}/${subPath}`;
         const data = await amClient.rawGet(tok.access_token, fullPath);
-        res.json({
-            success: true,
-            requestedPath: fullPath,
-            data
-        });
+        res.json({ success: true, requestedPath: fullPath, data });
     } catch (error) {
-        res.status(error.status || 500).json({
-            success: false,
-            error: error.message,
-            body: error.body || null
-        });
+        res.status(error.status || 500).json({ success: false, error: error.message, body: error.body || null });
     }
 });
 
-// Debug info (DB-backed)
+// ────────────────────────────────────────────────────────────────────────
+// Debug / health
+// ────────────────────────────────────────────────────────────────────────
 app.get('/debug/info', async (req, res) => {
     try {
         const result = await pool.query(
@@ -714,7 +797,7 @@ app.get('/debug/info', async (req, res) => {
                 recordExists: !!row,
                 hasAccessToken: row?.has_access_token || false,
                 hasRefreshToken: row?.has_refresh_token || false,
-                expiresAt: expiresAt,
+                expiresAt,
                 expiresAtIso: expiresAt ? new Date(expiresAt).toISOString() : null,
                 isExpired: expiresAt ? expiresAt < Date.now() : null,
                 organizationCount: row?.organizations ? (Array.isArray(row.organizations) ? row.organizations.length : 0) : 0,
@@ -728,15 +811,12 @@ app.get('/debug/info', async (req, res) => {
     }
 });
 
-// Health check
 app.get('/health', async (req, res) => {
     let dbOk = false;
     try {
         await pool.query('SELECT 1');
         dbOk = true;
-    } catch (e) {
-        // leave dbOk false
-    }
+    } catch (e) {}
 
     const tokenRecord = await getApprovalMaxToken().catch(() => null);
 
@@ -752,7 +832,6 @@ app.get('/health', async (req, res) => {
 app.listen(port, async () => {
     console.log('ApprovalMax API Data Tester running on port', port);
     console.log('Callback URL:', APPROVALMAX_CONFIG.redirectUri);
-    console.log('Test URL:', APPROVALMAX_CONFIG.redirectUri.replace('/callback/approvalmax', ''));
     console.log('DB persistence:', process.env.DATABASE_URL ? 'enabled' : 'DISABLED (no DATABASE_URL)');
     await ensureSchema();
 });
