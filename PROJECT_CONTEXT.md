@@ -18,6 +18,18 @@ Duane's **primary focus is ANALYSIS and value proposition** — not building a g
 
 ---
 
+## AM adoption at RAC — timing matters for analysis
+
+AM has been in use at RAC for approximately **11 months** (so adoption around May 2025). In recent months AM has become the settled workflow — easier to use than bypass. This has a direct implication for data sampling:
+
+**When AM was first connected to Xero, it back-filled historical Xero records.** Those back-filled records appear in the API response with `origin: "xero"` and a thin system-generated `events` array (`pulledFromSource` + `approvedInXero`, both with zero-UUID author). They are NOT cases of "AM being bypassed" — they are pre-AM Xero transactions that AM ingested as already-approved historical context.
+
+**Any analysis must filter by date to distinguish backfill from live AM-era traffic.** Samples from before ~May 2025 tell us nothing about current governance or workflow patterns. All sampling, analysis, and KPIs should restrict to the AM-era window (use `createdAtOrAfter=2025-06-01` or similar as a safe post-adoption cutoff).
+
+This lesson came from a Day 1 mistake: a single PO dated 2025-03-14 was inspected and — on a sample size of one — interpreted as evidence that AM sometimes acts as a passive witness to Xero-driven approvals. That was wrong in both senses: sample too small, and the record pre-dated AM's presence at RAC. Don't repeat this — filter by date, sample broadly.
+
+---
+
 ## The 5 entities
 
 | # | Name | Company UUID |
@@ -34,16 +46,16 @@ AM Subscription: **AMS-14868**. **Now on 14-day All Features trial started 2026-
 
 ## Current state — end of Day 1
 
-Pipeline is working end-to-end for the first time in RAC's 17-month ApprovalMax history. One click of the **Cross-entity summary** button returns:
+Pipeline is working end-to-end for the first time since RAC adopted AM. One click of the **Cross-entity summary** button returns:
 
 ```
-totalCount: 902 (floor — clamped at limit=100 per entity per type)
+totalCount: 902 (floor — clamped at limit=100 per entity per type, INCLUDES backfill)
   purchase-orders: 473
   bills: 429
   across 5 entities
 ```
 
-All 4 of Mining/Aboriginal Corp/Property/Enterprises hit exactly 100 POs and 100 Bills, meaning they have more requests that pagination would reveal. Only Invest (73 POs / 29 Bills) returned complete data.
+All 4 of Mining/Aboriginal Corp/Property/Enterprises hit exactly 100 POs and 100 Bills, meaning they have more requests that pagination would reveal. Only Invest (73 POs / 29 Bills) returned complete data. Critically, this count blends pre-AM backfill with live AM-era traffic — the AM-era subset is unknown until we filter by `createdAtOrAfter`.
 
 ### What's proven to work
 
@@ -60,9 +72,17 @@ OAuth authorisation code flow with `offline_access` scope. Access and refresh to
 - `GET /api/debug/raw?companyId=X&path=Y` — raw passthrough for reconciliation
 - `GET /debug/info`, `GET /health` — diagnostics
 
-### Latest commit on main
+### Supported but unused query params (in the client, not yet in server/UI)
 
-`5c160c7` — *Default /api/xero/summary to no requestStatus filter*
+The `approvalmax-client.js` `buildQueryString` helper already supports:
+`reference`, `documentNumber`, `createdAtOrAfter`, `modifiedAtOrAfter`, `decidedAtOrAfter`, `orderBy`, `orderDirection`
+
+The server endpoints pass through `requestStatus`, `limit`, and `continuationToken`. Wiring `createdAtOrAfter`, `orderBy`, and `orderDirection` through to the endpoints and UI is Day 2 priority work — it's what enables the AM-era filter described above.
+
+### Latest commits on main
+
+- `8930579` — *Add Day 1 project context / handover doc*
+- `5c160c7` — *Default /api/xero/summary to no requestStatus filter*
 
 ---
 
@@ -119,9 +139,13 @@ AM returns ASP.NET Problem Details:
 
 The `error` field is an OBJECT, not a string. Template literal interpolation (`` `${data.error}` ``) produces `[object Object]` and hides the real message. The fix lives in `approvalmax-client.js` as `extractErrorMessage()` — it walks common string fields (`error`, `message`, `detail`, `title`) before falling back to `JSON.stringify(data)` truncated to 800 chars. Per-entity error handlers in `server.js` also pass `err.body` through so the caller sees the full AM response, not just the summary string.
 
-### requestStatus enum — still undocumented
+### requestStatus enum — one confirmed value, others still unknown
 
-`OnApproval` was a guess. AM rejected it: *"unrecognized value 'OnApproval' for 'RequestStatus'"*. The swagger spec has the enum definition somewhere but it's deep in the schema list and we haven't reached it yet. Current UI workaround: default to "(no filter)" and label known guesses as `(guess)` in the dropdown. **The real enum values will appear in the returned items' `requestStatus` field** once we actually inspect some data (next session's first task).
+**Confirmed:** `approved` (lowercase, observed in a real returned PO). My guesses `OnApproval`, `Approved`, `Rejected`, `Draft` were all wrong — the enum is lowercase/camelCase, not PascalCase. Likely values to try for live AM-era requests: `onApproval`, `rejected`, `draft`, `cancelled`, `submitted`. The UI dropdown currently still has the PascalCase guesses marked `(guess)` — update them once each is confirmed from real data.
+
+### Backfill vs live AM-era records
+
+Covered in detail in the "AM adoption at RAC" section above. Short version: back-filled Xero records look like `origin: "xero"` with thin system events. Live AM-era records are expected to have richer `events` arrays with human authors and workflow progression. Don't confuse the two. Always filter by `createdAtOrAfter` post-adoption cutoff when doing analysis.
 
 ### OneDrive + Git gotcha (resolved)
 
@@ -133,42 +157,63 @@ The homepage HTML is built as a template literal inside `server.js`. After a Rai
 
 ---
 
+## PO data shape (observed from one backfilled PO — use with caution for live-era assumptions)
+
+Rich fields confirmed to exist on a Xero Purchase Order response:
+
+- **Identity:** `requestId`, `companyId`, `documentNumber` (e.g. `PO-0608`), `friendlyName`, `externalUrl` (deep-link into Xero — great for dashboard tile UX)
+- **Supplier:** `contactId`, `contact` (denormalised name — no join needed for supplier concentration)
+- **Money:** `subTotal`, `totalTax`, `total`, `remainingBalance`, `currencyCode`, `exchangeRate`, `taxType`
+- **Dates:** `date` (document date), `createdAt` (AM ingestion), `modifiedAt`, `decisionDate`, `deliveryDate`
+- **Status:** `requestStatus` (lowercase enum), `billed` (boolean), `origin` (`xero` or other)
+- **Line items:** full detail — `quantity`, `itemPrice`, `amount`, `description`, `account` / `accountCode` / `accountId`, `item` / `itemCode` / `itemId`, `taxCode` / `taxRate` / `taxRateString`, `discountRate`
+- **Tracking:** per-line-item `tracking` array with `categoryId` / `categoryName` / `optionId` / `optionName` — THIS is how spend-by-project is captured (e.g. `Job → "05 - Gravel and Sand Quarry"`). Big deal for analysis.
+- **Attachments:** array of `{ attachmentId, fileName, fileSize }` — compliance angle: which POs are missing supporting docs?
+- **Events:** array of `{ eventType, eventDate, authorId, isSystem, comment, commentId, commentAttachments }`. On backfilled records, only two events both marked `isSystem: true` with zero-UUID author. **Live AM-era records need to be inspected to confirm richer event shape — this is a key Day 2 task.**
+- **Address/contact:** `deliveryAddress`, `deliveryInstructions`, `phone`, `attentionTo`
+- **Reference:** free-text `reference` field (e.g. "Remote Tank fuel") — useful for grouping related POs
+
+Caveat repeated: this was ONE backfilled PO. Live AM-era records may have additional fields (e.g. `approvers`, `approvalSteps`, `workflow`, `currentApprover`, `pendingWith`) that didn't appear because the PO wasn't processed through AM's workflow. Don't assume this field list is complete for the workflow-active case.
+
+---
+
 ## Next session — priorities in order
 
 Duane's preference: concentrate on ANALYSIS and value proposition, not infrastructure. Keep the pipeline minimal and pivot to insight as soon as possible.
 
-### 1. Peek at a single real request — understand the data we have
+### 1. Wire date-range and ordering filters through the stack
 
-```
-GET /api/xero/purchase-orders/6655cc87-de32-40d1-aee9-5f78abac57fe?limit=1
-```
+Add `createdAtOrAfter`, `orderBy`, `orderDirection` as query params on the server endpoints (client already supports them). Update UI with a date-range picker or at minimum a "show AM-era only" toggle. This unlocks meaningful sampling.
 
-This returns ONE real Mining PO. From it we learn:
-- The actual field names on a PO (supplier, amount, currency, approval events, approvers, dates, etc.)
-- The real `requestStatus` enum value (replaces our guesses)
-- The shape of the approval event log — this is where bottleneck analysis lives
-- How amounts, currencies, and totals are structured
-- Whether the `events` array has approver identities, timestamps, and actions
+Default sort should probably be `orderBy=createdAt&orderDirection=Desc` so newest records surface first — gets us to current governance patterns fastest.
 
-This step gates everything else. Dashboard design without knowing the data shape is speculation. Paste the response back and we design from reality.
+### 2. Sample a basket of live AM-era records
 
-### 2. Wire up pagination in /api/xero/summary
+Fetch something like 10-20 records across:
+- Different entities (Mining vs Aboriginal Corp vs Property — governance likely varies)
+- Different statuses (`approved`, `onApproval`, and whatever else the enum turns out to include)
+- Both POs and Bills
+- All with `createdAtOrAfter=2025-06-01` or similar post-adoption cutoff
 
-The `continuationToken` loop — fetch until token is null — so we get accurate totals instead of 100-clamped floors. AM caps `limit` at 100 per call, so we have to loop. Known rate limits: 100 reads/min per ClientId+CompanyId combo. 5 entities × 2 types × a few pages each is well within limits.
+From those samples we learn: real `events` structure with human authors, whether `approvers` / `approvalSteps` / `workflow` fields exist, workflow patterns by entity, actual requestStatus enum values. THIS is where design-by-reality happens.
 
-### 3. Start the analysis work
+### 3. Wire up pagination in /api/xero/summary
 
-Once steps 1-2 are done, the focus shifts to six buckets Duane previously identified:
+The `continuationToken` loop — fetch until token is null — so we get accurate totals instead of 100-clamped floors. Known rate limits: 100 reads/min per ClientId+CompanyId combo. 5 entities × 2 types × a few pages each is well within limits. Do this AFTER the date filter so totals aren't polluted with backfill.
+
+### 4. Start the analysis work
+
+Once steps 1-3 are done, the focus shifts to six buckets Duane previously identified:
 - Bottleneck view (which approvers hold up which requests, and for how long)
 - Committed spend (approved but not yet paid)
 - Approver workload distribution
-- Spend patterns (by supplier, category, entity, time)
-- Compliance / anomaly signals (the "CFO gold mine" — duplicate invoices, split POs, unusual approval paths)
+- Spend patterns (by supplier, category/tracking, entity, time)
+- Compliance / anomaly signals (the "CFO gold mine" — duplicate invoices, split POs, unusual approval paths, missing attachments, weekend/after-hours activity, amount anomalies by supplier)
 - Velocity / throughput (avg cycle time, bottleneck progression)
 
-The compliance/anomaly bucket is the argued-for premium upsell. That's where Duane wants to spend analysis effort — it's the hardest to get from AM natively and the highest-value output.
+The compliance/anomaly bucket is the argued-for premium upsell. That's where Duane wants to spend analysis effort — it's the hardest to get from AM natively and the highest-value output. The `tracking` line-item data, `attachments` array, and event log all feed directly into this.
 
-### 4. Consider MCP tool exposure (not urgent)
+### 5. Consider MCP tool exposure (not urgent)
 
 Following the `rac-mex-mcp/mcp-server.js` pattern, expose the REST endpoints as MCP tools for Claude Desktop use by finance team (Rhian/Paul/Matt). NOT priority — REST + browser dashboard first; MCP after the analysis shape is settled.
 
@@ -180,6 +225,7 @@ Following the `rac-mex-mcp/mcp-server.js` pattern, expose the REST endpoints as 
 - **No journal entries.** Not in the AM Xero endpoint set and not in scope.
 - **No generic dashboard for the sake of a dashboard.** Every tile earns its place by answering a question Rhian or Paul actually has.
 - **No premature MCP wrapping.** REST API and data model stabilise first.
+- **No conclusions from n=1 samples.** Day 1 mistake — don't repeat.
 
 ---
 
@@ -236,6 +282,7 @@ offline_access
 ## First thing a future Claude should do
 
 1. Read this file.
-2. Check latest commit on main — confirm it's at or beyond `5c160c7`.
+2. Check latest commit on main.
 3. Check if the All Features trial is still active (expiry approx 2026-05-05). If expired and no Premium upgrade, data endpoints will return "is disabled" errors and the session will need to start with that conversation.
-4. Ask Duane what he wants to do — don't assume it's next-step #1 in this doc unless he says so.
+4. **Internalise the backfill-vs-live-AM-era distinction before drawing any conclusions from sampled data.** First Claude got this wrong on Day 1.
+5. Ask Duane what he wants to do — don't assume it's next-step #1 in this doc unless he says so.
