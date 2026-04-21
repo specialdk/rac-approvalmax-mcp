@@ -541,6 +541,7 @@ app.get('/auth/status', async (req, res) => {
 
 // ═════════════════════════════════════════════════════════════════════════
 // REAL API ENDPOINTS - using approvalmax-client against correct AM paths
+// ORDER MATTERS: static routes BEFORE parameterized (:companyId) wildcards
 // ═════════════════════════════════════════════════════════════════════════
 
 // GET /api/companies - list all organisations the token can access
@@ -563,50 +564,8 @@ app.get('/api/companies', async (req, res) => {
     }
 });
 
-// GET /api/requests/:companyId - requests for a single company
-// Query params: ?status=OnApproval (default) ?limit=100
-app.get('/api/requests/:companyId', async (req, res) => {
-    try {
-        const tok = await requireToken();
-        const status = req.query.status || 'OnApproval';
-        const limit = Number(req.query.limit || 100);
-        const continuationToken = req.query.continuationToken;
-
-        const data = await amClient.getRequests(tok.access_token, req.params.companyId, {
-            status,
-            limit,
-            continuationToken
-        });
-
-        let items = [];
-        let nextToken = null;
-        if (Array.isArray(data)) {
-            items = data;
-        } else if (data && typeof data === 'object') {
-            items = data.items || data.data || [];
-            nextToken = data.continuationToken || null;
-        }
-
-        res.json({
-            success: true,
-            companyId: req.params.companyId,
-            status,
-            count: items.length,
-            continuationToken: nextToken,
-            data: items,
-            raw: data
-        });
-    } catch (error) {
-        res.status(error.status || 500).json({
-            success: false,
-            companyId: req.params.companyId,
-            error: error.message,
-            body: error.body || null
-        });
-    }
-});
-
 // GET /api/requests/all - consolidated view across ALL entities
+// MUST be defined BEFORE /api/requests/:companyId or Express matches :companyId='all'
 app.get('/api/requests/all', async (req, res) => {
     try {
         const tok = await requireToken();
@@ -661,6 +620,49 @@ app.get('/api/requests/all', async (req, res) => {
         res.status(error.status || 500).json({
             success: false,
             error: error.message
+        });
+    }
+});
+
+// GET /api/requests/:companyId - requests for a single company
+// Query params: ?status=OnApproval (default) ?limit=100
+app.get('/api/requests/:companyId', async (req, res) => {
+    try {
+        const tok = await requireToken();
+        const status = req.query.status || 'OnApproval';
+        const limit = Number(req.query.limit || 100);
+        const continuationToken = req.query.continuationToken;
+
+        const data = await amClient.getRequests(tok.access_token, req.params.companyId, {
+            status,
+            limit,
+            continuationToken
+        });
+
+        let items = [];
+        let nextToken = null;
+        if (Array.isArray(data)) {
+            items = data;
+        } else if (data && typeof data === 'object') {
+            items = data.items || data.data || [];
+            nextToken = data.continuationToken || null;
+        }
+
+        res.json({
+            success: true,
+            companyId: req.params.companyId,
+            status,
+            count: items.length,
+            continuationToken: nextToken,
+            data: items,
+            raw: data
+        });
+    } catch (error) {
+        res.status(error.status || 500).json({
+            success: false,
+            companyId: req.params.companyId,
+            error: error.message,
+            body: error.body || null
         });
     }
 });
