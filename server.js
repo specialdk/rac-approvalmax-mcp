@@ -309,12 +309,16 @@ app.get('/', (req, res) => {
             <div class="control-row">
                 <label for="statusPicker">Request status:</label>
                 <select id="statusPicker">
-                    <option value="OnApproval" selected>OnApproval (pending)</option>
-                    <option value="Approved">Approved</option>
-                    <option value="Rejected">Rejected</option>
-                    <option value="Draft">Draft</option>
-                    <option value="">(no filter - all)</option>
+                    <option value="" selected>(no filter - all statuses)</option>
+                    <option value="OnApproval">OnApproval (guess)</option>
+                    <option value="Approved">Approved (guess)</option>
+                    <option value="Rejected">Rejected (guess)</option>
+                    <option value="Draft">Draft (guess)</option>
                 </select>
+                <small style="width: 100%; color: #64748b; margin-top: 4px;">
+                    Leave as "no filter" to see the real values from returned data.
+                    Unknown enum values will return a 400 error — the valid values will appear in the returned items' <code>requestStatus</code> field.
+                </small>
             </div>
 
             <div class="control-row">
@@ -602,13 +606,11 @@ app.get('/api/companies', async (req, res) => {
 });
 
 // GET /api/xero/summary - cross-entity KPI summary (POs + Bills across all 5 orgs)
-// Query: ?requestStatus=OnApproval (default)
+// Query: ?requestStatus=X (optional; default: no filter, returns all statuses)
 app.get('/api/xero/summary', async (req, res) => {
     try {
         const tok = await requireToken();
-        const requestStatus = req.query.requestStatus === undefined
-            ? 'OnApproval'
-            : (req.query.requestStatus || undefined); // empty string means no filter
+        const requestStatus = req.query.requestStatus || undefined; // default: no filter, return all
 
         let companies = Array.isArray(tok.organizations) ? tok.organizations : [];
         if (companies.length === 0) {
