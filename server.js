@@ -637,7 +637,11 @@ app.get('/api/xero/summary', async (req, res) => {
                     totalsByType[xeroType] = (totalsByType[xeroType] || 0) + count;
                     totalCount += count;
                 } catch (err) {
-                    entry.counts[xeroType] = { error: err.message, status: err.status || null };
+                    entry.counts[xeroType] = {
+                        error: err.message,
+                        status: err.status || null,
+                        body: err.body || null
+                    };
                 }
             }
 

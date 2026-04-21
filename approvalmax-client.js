@@ -22,6 +22,30 @@ const XERO_TYPES = [
     'quotes'
 ];
 
+// Extract a readable error message from an AM error body.
+// AM returns ASP.NET-style problem details, and validation errors come as
+// { errors: { fieldName: ["...reason..."] } } rather than a plain string.
+function extractErrorMessage(data, status) {
+    if (!data) return `HTTP ${status}`;
+    if (typeof data.error === 'string') return data.error;
+    if (typeof data.message === 'string') return data.message;
+    if (typeof data.detail === 'string') return data.detail;
+    if (typeof data.title === 'string' && !data.errors) return data.title;
+    // ASP.NET model validation: { errors: { requestStatus: ["..."] } }
+    if (data.errors && typeof data.errors === 'object') {
+        try {
+            return 'Validation: ' + JSON.stringify(data.errors);
+        } catch (e) { /* fall through */ }
+    }
+    // Fallback: serialise the body (truncated)
+    try {
+        const s = JSON.stringify(data);
+        return s.length > 800 ? s.slice(0, 800) + '...' : s;
+    } catch (e) {
+        return `HTTP ${status}`;
+    }
+}
+
 // Core HTTP helper - all API methods route through here
 async function callAM(accessToken, path, options = {}) {
     const url = `${BASE_URL}${path}`;
@@ -46,10 +70,11 @@ async function callAM(accessToken, path, options = {}) {
     }
 
     if (!response.ok) {
-        const errMsg = data?.error || data?.message || data?.title || `HTTP ${response.status}`;
+        const errMsg = extractErrorMessage(data, response.status);
         const err = new Error(`AM API ${response.status}: ${errMsg}`);
         err.status = response.status;
         err.body = data;
+        err.url = url;
         throw err;
     }
 
@@ -78,7 +103,7 @@ function buildQueryString(filters = {}) {
     return qs ? '?' + qs : '';
 }
 
-// Normalize AM paged response shape
+// Normalise AM paged response shape
 function normalisePagedResponse(data) {
     if (!data) return { items: [], continuationToken: null, raw: data };
     // Official shape: { payload: [...], continuationToken: "..." }
@@ -96,13 +121,12 @@ function normalisePagedResponse(data) {
     return { items: [], continuationToken: null, raw: data };
 }
 
-// ── Companies ────────────────────────────────────────────────────────────
+// Companies
 async function getCompanies(accessToken) {
     return callAM(accessToken, '/companies');
 }
 
-// ── Xero requests (generic by type) ──────────────────────────────────────────────
-// xeroType must be one of XERO_TYPES values (or 'batch-payments', 'quotes', etc.)
+// Xero requests (generic by type)
 async function getXeroRequests(accessToken, companyId, xeroType, filters = {}) {
     const qs = buildQueryString(filters);
     const data = await callAM(accessToken, `/companies/${companyId}/xero/${xeroType}${qs}`);
@@ -113,32 +137,25 @@ async function getXeroRequest(accessToken, companyId, xeroType, requestId) {
     return callAM(accessToken, `/companies/${companyId}/xero/${xeroType}/${requestId}`);
 }
 
-// Convenience wrappers for the common types
 async function getXeroPurchaseOrders(accessToken, companyId, filters = {}) {
     return getXeroRequests(accessToken, companyId, 'purchase-orders', filters);
 }
-
 async function getXeroBills(accessToken, companyId, filters = {}) {
     return getXeroRequests(accessToken, companyId, 'bills', filters);
 }
-
 async function getXeroCreditNotes(accessToken, companyId, filters = {}) {
     return getXeroRequests(accessToken, companyId, 'credit-notes', filters);
 }
-
 async function getXeroSalesInvoices(accessToken, companyId, filters = {}) {
     return getXeroRequests(accessToken, companyId, 'sales-invoices', filters);
 }
-
 async function getXeroBatchPayments(accessToken, companyId, filters = {}) {
     return getXeroRequests(accessToken, companyId, 'batch-payments', filters);
 }
-
 async function getXeroQuotes(accessToken, companyId, filters = {}) {
     return getXeroRequests(accessToken, companyId, 'quotes', filters);
 }
 
-// ── Raw passthrough for debug/reconciliation ─────────────────────────────
 async function rawGet(accessToken, path) {
     return callAM(accessToken, path.startsWith('/') ? path : '/' + path);
 }
@@ -155,5 +172,6 @@ module.exports = {
     getXeroSalesInvoices,
     getXeroBatchPayments,
     getXeroQuotes,
-    rawGet
+    rawGet,
+    extractErrorMessage
 };
