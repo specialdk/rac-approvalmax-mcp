@@ -353,11 +353,16 @@ app.get('/', (req, res) => {
             <div class="control-row">
                 <label for="sortPicker">Sort:</label>
                 <select id="sortPicker">
-                    <option value="createdAt|Desc" selected>Newest first (createdAt, Desc)</option>
-                    <option value="createdAt|Asc">Oldest first (createdAt, Asc)</option>
-                    <option value="modifiedAt|Desc">Recently modified first</option>
-                    <option value="">(no sort specified)</option>
+                    <option value="" selected>(no sort - AM default)</option>
+                    <option value="CreatedAt|Desc">CreatedAt Desc (PascalCase guess)</option>
+                    <option value="CreatedAt|Asc">CreatedAt Asc (PascalCase guess)</option>
+                    <option value="ModifiedAt|Desc">ModifiedAt Desc (guess)</option>
+                    <option value="DecisionDate|Desc">DecisionDate Desc (guess)</option>
+                    <option value="Date|Desc">Date Desc (guess)</option>
                 </select>
+                <small style="width: 100%; color: #64748b; margin-top: 4px;">
+                    OrderBy enum values are unknown. 'createdAt' (camelCase) was rejected — trying PascalCase since orderDirection uses Asc/Desc.
+                </small>
             </div>
 
             <div class="control-row">
@@ -410,7 +415,7 @@ app.get('/', (req, res) => {
         }
 
         // Build the shared query-string portion from the filter controls.
-        // Returns a string like "&requestStatus=approved&createdAtOrAfter=2025-06-01&orderBy=createdAt&orderDirection=Desc"
+        // Returns a string like "requestStatus=approved&createdAtOrAfter=2025-06-01&orderBy=CreatedAt&orderDirection=Desc"
         // or empty string if nothing applies. Caller decides whether to prefix with '?' or '&'.
         function buildFilterParams() {
             const parts = [];
