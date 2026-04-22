@@ -29,6 +29,20 @@ const INTEGRATION_KEY = 'approvalmax_integration';
 // Kept short intentionally - expand if needed for specific reporting
 const DEFAULT_XERO_TYPES_FOR_AGGREGATION = ['purchase-orders', 'bills'];
 
+// Safe default for AM adoption cutoff - see PROJECT_CONTEXT.md
+// "AM adoption at RAC" section. Records created before this are backfill.
+const DEFAULT_AM_ERA_CUTOFF = '2025-06-01';
+
+// Helper: pull the three new filter params from a request's query string in one go.
+// Returns { createdAtOrAfter, orderBy, orderDirection } with undefineds for absent values.
+function extractAnalysisFilters(query) {
+    return {
+        createdAtOrAfter: query.createdAtOrAfter || undefined,
+        orderBy: query.orderBy || undefined,
+        orderDirection: query.orderDirection || undefined
+    };
+}
+
 // Postgres pool
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -238,8 +252,8 @@ app.get('/', (req, res) => {
             align-items: center;
             margin: 10px 0;
         }
-        .control-row label { font-weight: 500; color: #4a5568; min-width: 90px; }
-        .control-row select {
+        .control-row label { font-weight: 500; color: #4a5568; min-width: 130px; }
+        .control-row select, .control-row input[type="date"] {
             padding: 8px;
             border-radius: 6px;
             border: 1px solid #cbd5e1;
@@ -263,6 +277,15 @@ app.get('/', (req, res) => {
         }
         .kpi-card .num { font-size: 24px; font-weight: 700; color: #8B5A96; }
         .kpi-card .label { font-size: 12px; color: #64748b; margin-top: 4px; }
+        .filter-summary {
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            color: #1e40af;
+            padding: 10px 14px;
+            border-radius: 6px;
+            font-size: 13px;
+            margin: 10px 0;
+        }
     </style>
 </head>
 <body>
@@ -310,15 +333,31 @@ app.get('/', (req, res) => {
                 <label for="statusPicker">Request status:</label>
                 <select id="statusPicker">
                     <option value="" selected>(no filter - all statuses)</option>
-                    <option value="OnApproval">OnApproval (guess)</option>
-                    <option value="Approved">Approved (guess)</option>
-                    <option value="Rejected">Rejected (guess)</option>
-                    <option value="Draft">Draft (guess)</option>
+                    <option value="approved">approved (confirmed)</option>
+                    <option value="onApproval">onApproval (guess)</option>
+                    <option value="rejected">rejected (guess)</option>
+                    <option value="draft">draft (guess)</option>
+                    <option value="cancelled">cancelled (guess)</option>
+                    <option value="submitted">submitted (guess)</option>
                 </select>
+            </div>
+
+            <div class="control-row">
+                <label for="createdAtOrAfterPicker">Created on or after:</label>
+                <input type="date" id="createdAtOrAfterPicker" value="${DEFAULT_AM_ERA_CUTOFF}">
                 <small style="width: 100%; color: #64748b; margin-top: 4px;">
-                    Leave as "no filter" to see the real values from returned data.
-                    Unknown enum values will return a 400 error — the valid values will appear in the returned items' <code>requestStatus</code> field.
+                    Default <code>${DEFAULT_AM_ERA_CUTOFF}</code> skips pre-AM backfill records. Clear the date to include everything (incl. backfill).
                 </small>
+            </div>
+
+            <div class="control-row">
+                <label for="sortPicker">Sort:</label>
+                <select id="sortPicker">
+                    <option value="createdAt|Desc" selected>Newest first (createdAt, Desc)</option>
+                    <option value="createdAt|Asc">Oldest first (createdAt, Asc)</option>
+                    <option value="modifiedAt|Desc">Recently modified first</option>
+                    <option value="">(no sort specified)</option>
+                </select>
             </div>
 
             <div class="control-row">
@@ -335,6 +374,7 @@ app.get('/', (req, res) => {
                 <button onclick="fetchXeroByType()" disabled id="btn-xero-type">Fetch by type (uses selectors above)</button>
             </div>
 
+            <div id="filterSummary"></div>
             <div id="kpiRow"></div>
             <div id="apiResult"></div>
         </div>
@@ -369,6 +409,42 @@ app.get('/', (req, res) => {
                 });
         }
 
+        // Build the shared query-string portion from the filter controls.
+        // Returns a string like "&requestStatus=approved&createdAtOrAfter=2025-06-01&orderBy=createdAt&orderDirection=Desc"
+        // or empty string if nothing applies. Caller decides whether to prefix with '?' or '&'.
+        function buildFilterParams() {
+            const parts = [];
+            const status = document.getElementById('statusPicker').value;
+            if (status) parts.push('requestStatus=' + encodeURIComponent(status));
+
+            const createdAtOrAfter = document.getElementById('createdAtOrAfterPicker').value;
+            if (createdAtOrAfter) parts.push('createdAtOrAfter=' + encodeURIComponent(createdAtOrAfter));
+
+            const sortValue = document.getElementById('sortPicker').value;
+            if (sortValue) {
+                const [orderBy, orderDirection] = sortValue.split('|');
+                if (orderBy) parts.push('orderBy=' + encodeURIComponent(orderBy));
+                if (orderDirection) parts.push('orderDirection=' + encodeURIComponent(orderDirection));
+            }
+
+            return parts.join('&');
+        }
+
+        function renderFilterSummary() {
+            const status = document.getElementById('statusPicker').value || '(all statuses)';
+            const createdAtOrAfter = document.getElementById('createdAtOrAfterPicker').value || '(no date filter — includes backfill)';
+            const sortValue = document.getElementById('sortPicker').value;
+            let sortLabel = '(no sort)';
+            if (sortValue) {
+                const [orderBy, orderDirection] = sortValue.split('|');
+                sortLabel = orderBy + ' ' + orderDirection;
+            }
+            document.getElementById('filterSummary').innerHTML =
+                '<div class="filter-summary">Filters: status=<strong>' + status +
+                '</strong>, createdAtOrAfter=<strong>' + createdAtOrAfter +
+                '</strong>, sort=<strong>' + sortLabel + '</strong></div>';
+        }
+
         function callApi(path) {
             showLoading('apiResult');
             document.getElementById('kpiRow').innerHTML = '';
@@ -386,22 +462,23 @@ app.get('/', (req, res) => {
 
         function fetchXeroByType() {
             const type = document.getElementById('typePicker').value;
-            const status = document.getElementById('statusPicker').value;
             const companyId = document.getElementById('companyPicker').value;
-            const statusParam = status ? '&requestStatus=' + encodeURIComponent(status) : '';
-            if (companyId) {
-                callApi('/api/xero/' + type + '/' + companyId + '?limit=100' + statusParam);
-            } else {
-                callApi('/api/xero/' + type + '?limit=100' + statusParam);
-            }
+            const filterParams = buildFilterParams();
+            const basePath = companyId
+                ? '/api/xero/' + type + '/' + companyId
+                : '/api/xero/' + type;
+            const qs = 'limit=100' + (filterParams ? '&' + filterParams : '');
+            renderFilterSummary();
+            callApi(basePath + '?' + qs);
         }
 
         function fetchCrossEntitySummary() {
-            const status = document.getElementById('statusPicker').value;
-            const statusParam = status ? '?requestStatus=' + encodeURIComponent(status) : '';
+            const filterParams = buildFilterParams();
+            const qs = filterParams ? '?' + filterParams : '';
+            renderFilterSummary();
             showLoading('apiResult');
             document.getElementById('kpiRow').innerHTML = '';
-            fetch('/api/xero/summary' + statusParam)
+            fetch('/api/xero/summary' + qs)
                 .then(r => r.json())
                 .then(data => {
                     renderSummaryKPIs(data);
@@ -418,7 +495,7 @@ app.get('/', (req, res) => {
             if (!data || !data.success) return;
             const html =
                 '<div class="kpi-row">' +
-                '<div class="kpi-card"><div class="num">' + (data.totalCount || 0) + '</div><div class="label">Total ' + data.requestStatus + '</div></div>' +
+                '<div class="kpi-card"><div class="num">' + (data.totalCount || 0) + '</div><div class="label">Total (' + data.requestStatus + ')</div></div>' +
                 '<div class="kpi-card"><div class="num">' + (data.totalsByType?.['purchase-orders'] || 0) + '</div><div class="label">Purchase Orders</div></div>' +
                 '<div class="kpi-card"><div class="num">' + (data.totalsByType?.['bills'] || 0) + '</div><div class="label">Bills</div></div>' +
                 '<div class="kpi-card"><div class="num">' + (data.entityCount || 0) + '</div><div class="label">Entities</div></div>' +
@@ -606,11 +683,12 @@ app.get('/api/companies', async (req, res) => {
 });
 
 // GET /api/xero/summary - cross-entity KPI summary (POs + Bills across all 5 orgs)
-// Query: ?requestStatus=X (optional; default: no filter, returns all statuses)
+// Query: requestStatus, createdAtOrAfter, orderBy, orderDirection (all optional)
 app.get('/api/xero/summary', async (req, res) => {
     try {
         const tok = await requireToken();
-        const requestStatus = req.query.requestStatus || undefined; // default: no filter, return all
+        const requestStatus = req.query.requestStatus || undefined;
+        const analysisFilters = extractAnalysisFilters(req.query);
 
         let companies = Array.isArray(tok.organizations) ? tok.organizations : [];
         if (companies.length === 0) {
@@ -631,7 +709,8 @@ app.get('/api/xero/summary', async (req, res) => {
                 try {
                     const result = await amClient.getXeroRequests(tok.access_token, companyId, xeroType, {
                         requestStatus,
-                        limit: 100
+                        limit: 100,
+                        ...analysisFilters
                     });
                     const count = result.items.length;
                     entry.counts[xeroType] = count;
@@ -653,6 +732,7 @@ app.get('/api/xero/summary', async (req, res) => {
         res.json({
             success: true,
             requestStatus: requestStatus || 'ALL',
+            filters: analysisFilters,
             entityCount: companies.length,
             totalCount,
             totalsByType,
@@ -672,6 +752,7 @@ app.get('/api/xero/:type', async (req, res) => {
         const xeroType = req.params.type;
         const requestStatus = req.query.requestStatus || undefined;
         const limit = Number(req.query.limit || 100);
+        const analysisFilters = extractAnalysisFilters(req.query);
 
         let companies = Array.isArray(tok.organizations) ? tok.organizations : [];
         if (companies.length === 0) {
@@ -688,7 +769,8 @@ app.get('/api/xero/:type', async (req, res) => {
             try {
                 const result = await amClient.getXeroRequests(tok.access_token, companyId, xeroType, {
                     requestStatus,
-                    limit
+                    limit,
+                    ...analysisFilters
                 });
                 totalCount += result.items.length;
                 byCompany.push({
@@ -713,6 +795,7 @@ app.get('/api/xero/:type', async (req, res) => {
             success: true,
             xeroType,
             requestStatus: requestStatus || 'ALL',
+            filters: analysisFilters,
             entityCount: companies.length,
             totalCount,
             byCompany
@@ -731,11 +814,13 @@ app.get('/api/xero/:type/:companyId', async (req, res) => {
         const requestStatus = req.query.requestStatus || undefined;
         const limit = Number(req.query.limit || 100);
         const continuationToken = req.query.continuationToken;
+        const analysisFilters = extractAnalysisFilters(req.query);
 
         const result = await amClient.getXeroRequests(tok.access_token, companyId, xeroType, {
             requestStatus,
             limit,
-            continuationToken
+            continuationToken,
+            ...analysisFilters
         });
 
         res.json({
@@ -743,6 +828,7 @@ app.get('/api/xero/:type/:companyId', async (req, res) => {
             xeroType,
             companyId,
             requestStatus: requestStatus || 'ALL',
+            filters: analysisFilters,
             count: result.items.length,
             continuationToken: result.continuationToken,
             items: result.items
