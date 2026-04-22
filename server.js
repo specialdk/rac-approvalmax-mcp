@@ -33,6 +33,12 @@ const DEFAULT_XERO_TYPES_FOR_AGGREGATION = ['purchase-orders', 'bills'];
 // "AM adoption at RAC" section. Records created before this are backfill.
 const DEFAULT_AM_ERA_CUTOFF = '2025-06-01';
 
+// Maximum pages fetched per (entity, type) combo in summary endpoint.
+// AM caps limit at 100 per page, so MAX_PAGES_PER_COUNT=20 = 2,000 records.
+// AM rate limit is 100 reads/min per ClientId+CompanyId; 5 entities × 2 types × 20 pages
+// = 200 calls worst case but spread across different CompanyIds so well within limits.
+const MAX_PAGES_PER_COUNT = 20;
+
 // Helper: pull the three new filter params from a request's query string in one go.
 // Returns { createdAtOrAfter, orderBy, orderDirection } with undefineds for absent values.
 function extractAnalysisFilters(query) {
@@ -41,6 +47,34 @@ function extractAnalysisFilters(query) {
         orderBy: query.orderBy || undefined,
         orderDirection: query.orderDirection || undefined
     };
+}
+
+// Helper: fully paginate through AM's continuationToken for one (entity, type) combo
+// and return the total record count. Does NOT return the items themselves - that would
+// defeat the purpose of an aggregation endpoint. Stops at MAX_PAGES_PER_COUNT with
+// capped=true so we never loop indefinitely.
+async function countAllPages(accessToken, companyId, xeroType, baseFilters) {
+    let count = 0;
+    let pages = 0;
+    let continuationToken = undefined;
+    let capped = false;
+
+    do {
+        const result = await amClient.getXeroRequests(accessToken, companyId, xeroType, {
+            ...baseFilters,
+            limit: 100,
+            continuationToken
+        });
+        count += result.items.length;
+        continuationToken = result.continuationToken;
+        pages++;
+        if (pages >= MAX_PAGES_PER_COUNT && continuationToken) {
+            capped = true;
+            break;
+        }
+    } while (continuationToken);
+
+    return { count, pages, capped };
 }
 
 // Postgres pool
@@ -286,6 +320,15 @@ app.get('/', (req, res) => {
             font-size: 13px;
             margin: 10px 0;
         }
+        .capped-warning {
+            background: #fffbeb;
+            border: 1px solid #f59e0b;
+            color: #92400e;
+            padding: 10px 14px;
+            border-radius: 6px;
+            font-size: 13px;
+            margin: 10px 0;
+        }
     </style>
 </head>
 <body>
@@ -354,14 +397,13 @@ app.get('/', (req, res) => {
                 <label for="sortPicker">Sort:</label>
                 <select id="sortPicker">
                     <option value="" selected>(no sort - AM default)</option>
-                    <option value="CreatedAt|Desc">CreatedAt Desc (PascalCase guess)</option>
-                    <option value="CreatedAt|Asc">CreatedAt Asc (PascalCase guess)</option>
+                    <option value="CreatedAt|Desc">CreatedAt Desc (guess - REJECTED by AM)</option>
                     <option value="ModifiedAt|Desc">ModifiedAt Desc (guess)</option>
                     <option value="DecisionDate|Desc">DecisionDate Desc (guess)</option>
                     <option value="Date|Desc">Date Desc (guess)</option>
                 </select>
                 <small style="width: 100%; color: #64748b; margin-top: 4px;">
-                    OrderBy enum values are unknown. 'createdAt' (camelCase) was rejected — trying PascalCase since orderDirection uses Asc/Desc.
+                    OrderBy enum unknown. Both 'createdAt' and 'CreatedAt' rejected. Parked for now.
                 </small>
             </div>
 
@@ -380,6 +422,7 @@ app.get('/', (req, res) => {
             </div>
 
             <div id="filterSummary"></div>
+            <div id="cappedWarning"></div>
             <div id="kpiRow"></div>
             <div id="apiResult"></div>
         </div>
@@ -414,9 +457,6 @@ app.get('/', (req, res) => {
                 });
         }
 
-        // Build the shared query-string portion from the filter controls.
-        // Returns a string like "requestStatus=approved&createdAtOrAfter=2025-06-01&orderBy=CreatedAt&orderDirection=Desc"
-        // or empty string if nothing applies. Caller decides whether to prefix with '?' or '&'.
         function buildFilterParams() {
             const parts = [];
             const status = document.getElementById('statusPicker').value;
@@ -450,9 +490,27 @@ app.get('/', (req, res) => {
                 '</strong>, sort=<strong>' + sortLabel + '</strong></div>';
         }
 
+        function renderCappedWarning(data) {
+            const cappedEl = document.getElementById('cappedWarning');
+            if (!cappedEl) return;
+            if (data && data.anyCapped) {
+                const cappedCombos = [];
+                (data.byCompany || []).forEach(c => {
+                    (c.cappedTypes || []).forEach(t => cappedCombos.push(c.companyName + ' / ' + t));
+                });
+                cappedEl.innerHTML =
+                    '<div class="capped-warning">⚠️ Pagination cap reached (' +
+                    data.paginationCap + ' pages × 100 = ' + (data.paginationCap * 100) + ' records) for: <strong>' +
+                    cappedCombos.join(', ') + '</strong>. True counts may be higher.</div>';
+            } else {
+                cappedEl.innerHTML = '';
+            }
+        }
+
         function callApi(path) {
             showLoading('apiResult');
             document.getElementById('kpiRow').innerHTML = '';
+            document.getElementById('cappedWarning').innerHTML = '';
             fetch(path)
                 .then(r => r.json())
                 .then(data => {
@@ -483,10 +541,12 @@ app.get('/', (req, res) => {
             renderFilterSummary();
             showLoading('apiResult');
             document.getElementById('kpiRow').innerHTML = '';
+            document.getElementById('cappedWarning').innerHTML = '';
             fetch('/api/xero/summary' + qs)
                 .then(r => r.json())
                 .then(data => {
                     renderSummaryKPIs(data);
+                    renderCappedWarning(data);
                     document.getElementById('apiResult').innerHTML =
                         '<div class="result">' + JSON.stringify(data, null, 2) + '</div>';
                 })
@@ -519,7 +579,7 @@ app.get('/', (req, res) => {
 
         function showLoading(elementId) {
             document.getElementById(elementId).innerHTML =
-                '<div class="status pending">Loading...</div>';
+                '<div class="status pending">Loading... (pagination may take 5-15 seconds)</div>';
         }
 
         function enableButtons() {
@@ -688,6 +748,7 @@ app.get('/api/companies', async (req, res) => {
 });
 
 // GET /api/xero/summary - cross-entity KPI summary (POs + Bills across all 5 orgs)
+// Now paginates through all continuationToken pages per (entity, type) for TRUE totals.
 // Query: requestStatus, createdAtOrAfter, orderBy, orderDirection (all optional)
 app.get('/api/xero/summary', async (req, res) => {
     try {
@@ -703,25 +764,36 @@ app.get('/api/xero/summary', async (req, res) => {
 
         const byCompany = [];
         const totalsByType = {};
+        const pagesByTypeTotal = {};
         let totalCount = 0;
+        let totalPages = 0;
 
         for (const company of companies) {
             const companyId = company.companyId || company.id;
             const companyName = company.name || 'Unknown';
-            const entry = { companyId, companyName, counts: {}, totalForCompany: 0 };
+            const entry = {
+                companyId,
+                companyName,
+                counts: {},
+                pagesByType: {},
+                cappedTypes: [],
+                totalForCompany: 0
+            };
 
             for (const xeroType of DEFAULT_XERO_TYPES_FOR_AGGREGATION) {
                 try {
-                    const result = await amClient.getXeroRequests(tok.access_token, companyId, xeroType, {
-                        requestStatus,
-                        limit: 100,
-                        ...analysisFilters
-                    });
-                    const count = result.items.length;
+                    const { count, pages, capped } = await countAllPages(
+                        tok.access_token, companyId, xeroType,
+                        { requestStatus, ...analysisFilters }
+                    );
                     entry.counts[xeroType] = count;
+                    entry.pagesByType[xeroType] = pages;
+                    if (capped) entry.cappedTypes.push(xeroType);
                     entry.totalForCompany += count;
                     totalsByType[xeroType] = (totalsByType[xeroType] || 0) + count;
+                    pagesByTypeTotal[xeroType] = (pagesByTypeTotal[xeroType] || 0) + pages;
                     totalCount += count;
+                    totalPages += pages;
                 } catch (err) {
                     entry.counts[xeroType] = {
                         error: err.message,
@@ -734,6 +806,8 @@ app.get('/api/xero/summary', async (req, res) => {
             byCompany.push(entry);
         }
 
+        const anyCapped = byCompany.some(c => c.cappedTypes && c.cappedTypes.length > 0);
+
         res.json({
             success: true,
             requestStatus: requestStatus || 'ALL',
@@ -742,6 +816,10 @@ app.get('/api/xero/summary', async (req, res) => {
             totalCount,
             totalsByType,
             typesFetched: DEFAULT_XERO_TYPES_FOR_AGGREGATION,
+            paginationCap: MAX_PAGES_PER_COUNT,
+            anyCapped,
+            totalPagesFetched: totalPages,
+            pagesByTypeTotal,
             byCompany
         });
     } catch (error) {
@@ -751,6 +829,7 @@ app.get('/api/xero/summary', async (req, res) => {
 
 // GET /api/xero/:type - single type across ALL entities
 // Must come BEFORE /api/xero/:type/:companyId so Express matches correctly
+// NOT paginated - returns first page of items. Use /api/xero/summary for true counts.
 app.get('/api/xero/:type', async (req, res) => {
     try {
         const tok = await requireToken();
@@ -811,6 +890,7 @@ app.get('/api/xero/:type', async (req, res) => {
 });
 
 // GET /api/xero/:type/:companyId - single type for a single entity
+// NOT paginated - returns one page of items. Caller can pass continuationToken to get next.
 app.get('/api/xero/:type/:companyId', async (req, res) => {
     try {
         const tok = await requireToken();
