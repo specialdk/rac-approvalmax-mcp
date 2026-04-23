@@ -31,58 +31,150 @@ const FY25_AR_TOTAL = Object.values(FY25_AR_BASELINES).reduce((a, b) => a + b, 0
 // and the Denise Fincham Education Fund contribution which sit outside the
 // "We Provided" member-welfare category in the AR).
 
+// -----------------------------------------------------------------------------
+// Rule sets (ordered by specificity — first match wins within each tier)
+// -----------------------------------------------------------------------------
+
+// High-confidence supplier + account code combinations.
+// These fire BEFORE the generic supplier-name hints because a supplier + account
+// pairing is a stronger signal than supplier name alone.
+// Observed in Day 3 sampling: Yirrkala Enterprises uses the 250xx code family
+// for member charitable vouchers (food/goods/mobile to named recipients),
+// BP Nhulunbuy uses 63415 for fuel-voucher charitable payments, and Gove
+// Warehouse uses 64480 for whitegoods.
+const SUPPLIER_ACCOUNT_COMBOS = [
+    {
+        supplierPattern: /yirrkala enterprises/i,
+        accountCodes: ['25003', '25005', '25007', '25009'],
+        category: 'Family Charitable Payments',
+        confidence: 'high',
+        reason: 'Yirrkala Enterprises + 250xx account code → member voucher'
+    },
+    {
+        supplierPattern: /\bbp\b/i,
+        accountCodes: ['63415'],
+        category: 'Family Charitable Payments',
+        confidence: 'high',
+        reason: 'BP + 63415 → member fuel voucher'
+    },
+    {
+        supplierPattern: /gove warehouse/i,
+        accountCodes: ['64480'],
+        category: 'Whitegoods',
+        confidence: 'high',
+        reason: 'Gove Warehouse + 64480 → whitegoods/appliances'
+    }
+];
+
 // Supplier name patterns that indicate a category regardless of account code.
 // Ordered by specificity - first match wins.
 const SUPPLIER_CATEGORY_HINTS = [
-    { pattern: /gove transport|taxi/i,     category: 'Transport Assistance' },
-    { pattern: /funeral|memorial/i,        category: 'Family Funeral Support' },
+    // Road transport
+    { pattern: /gove transport|taxi|letsgo/i,     category: 'Transport Assistance' },
+    // Aviation / charter (Day 3: needed so recipient-fallback doesn't misfile
+    // charter flights as Family Charitable)
+    { pattern: /air frontier|black diamond aviation|maf international|nhulunbuy air/i, category: 'Transport Assistance' },
+    // Funeral / memorial
+    { pattern: /funeral|memorial/i,               category: 'Family Funeral Support' },
+    // Medical / pharmacy
     { pattern: /medical|pharma|chemist|clinic|hospital/i, category: 'Medical & Terminally Ill' },
+    // Whitegoods / large-appliance retail
     { pattern: /harvey norman|the good guys|appliances online|bing lee/i, category: 'Whitegoods' }
 ];
 
 // Internal corporate spend patterns - these POs are NOT welfare even though
 // they appear in Aboriginal Corp. Detected by description keywords that name
-// corporate assets (vehicle regos starting CE, office/building work, etc.).
+// corporate assets (vehicle regos, office/building work, RAC staff pickups).
 const INTERNAL_CORPORATE_PATTERNS = [
-    /\b[A-Z]{2}\d{2}[A-Z]{2}\b/,  // NT vehicle rego pattern (e.g. CE03AQ)
+    /\b[A-Z]{2}\d{2}[A-Z]{2}\b/,              // NT vehicle rego pattern (e.g. CE03AQ)
     /\bstandard service\b/i,
     /\boffice\b/i,
     /\bboardroom\b/i,
-    /\bstaff meeting\b/i
+    /\bstaff meeting\b/i,
+    /\bpick ?up by rac\b/i,                   // Day 3: "Pick up by RAC Staff"
+    /\bfor rac staff\b/i,
+    /\brac office\b/i
 ];
 
-// Regex for extracting recipient names from description text.
-// Matches "to [Name]" or "for [Name]" where Name is 2+ capitalised words,
-// optionally followed by "& Family" or "and Family".
+// Primary recipient extractor. Matches:
+//   "to First Last"             → "First Last"
+//   "for First Last"            → "First Last"
+//   "to First M Last"           → "First M Last"   (middle initial, with or without period)
+//   "to First Middle Last"      → "First Middle Last"
+//   "passenger: First Last"     → "First Last"
+//   optional "... and Family" / "... & Family" suffix
 //
-// Examples it catches:
-//   "Fuel to the value of $50 to Gayili Marika"
-//   "One way taxi from Yirrkala for Makungun Marika"
-//   "One way taxi ... Gayili Marika & Family"
-//
-// Will miss: first-name-only, nicknames, informal phrasing. Acceptable first-pass.
-const RECIPIENT_REGEX = /\b(?:to|for)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+(?:\s+(?:&|and)\s+Family)?)/;
+// The middle-initial branch (`[A-Z]\.?`) was added Day 3 after sampling showed
+// many charitable PO descriptions use initials (e.g. "Jerome G Yunupingu",
+// "Janice M Marika"). The "passenger" prefix was added for charter-flight POs.
+// "[Tt]o" / "[Ff]or" / "[Pp]assenger" handles descriptions that begin with a
+// capital letter (start of sentence).
+const RECIPIENT_REGEX = /\b(?:[Tt]o|[Ff]or|[Pp]assenger)\b[:\s]+([A-Z][a-z]+(?:\s+(?:[A-Z]\.?|[A-Z][a-z]+))*\s+[A-Z][a-z]+(?:\s+(?:&|and)\s+[Ff]amily)?)/;
+
+// Strings that the regex may extract but which are not actual people.
+// These are places, supplier names, or generic nouns that happen to match the
+// "two capitalised words" pattern. Added Day 3 after inspecting top-recipients
+// output and seeing "Ski Beach", "Boat Club", "Air Frontier" etc.
+const NON_PERSON_NAMES = new Set([
+    // Places / venues
+    'Ski Beach', 'Boat Club', 'Gove Dhalinbuy', 'Yanawal Units',
+    'Hospital Driver', 'Hospital Pickup', 'Training Group',
+    // Supplier names that sometimes show up as "to Air Frontier" etc.
+    'Air Frontier', 'Black Diamond', 'Yirrkala Enterprises',
+    'Gove Warehouse', 'Gove Transport', 'BP Nhulunbuy',
+    'Peninsula Bakery', 'Kamayan Cafe', 'Territory Funerals',
+    'Simplicity Funerals', 'Harvey Norman', 'Sodexo Remote',
+    'MAF International'
+]);
+
+// First-word denylist: any extracted "recipient" whose first word is one of
+// these is almost certainly a place name, not a person.
+const PLACE_FIRST_WORDS = new Set([
+    'Gove', 'Nhulunbuy', 'Yirrkala', 'Elcho', 'Gapuwiyak', 'Darwin',
+    'Gapuwiyak', 'Malpi', 'Arnhem'
+]);
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+/**
+ * Return combined description text for a PO, with whitespace normalised so
+ * newlines (\n, \r) and multiple spaces don't break the recipient regex or
+ * pollute extracted names.
+ */
+function combinedDescription(po) {
+    return (po.lineItems || [])
+        .map(li => (li.description || '').replace(/\s+/g, ' ').trim())
+        .join(' | ');
+}
 
 /**
  * Extract a recipient name from a PO's combined line-item descriptions.
- * Returns null if no match found.
+ * Returns null if no match found or if the match is on the non-person denylist.
  */
 function extractRecipient(po) {
-    const combinedDescription = (po.lineItems || [])
-        .map(li => li.description || '')
-        .join(' | ');
-    const match = combinedDescription.match(RECIPIENT_REGEX);
-    return match ? match[1].trim() : null;
+    const text = combinedDescription(po);
+    const match = text.match(RECIPIENT_REGEX);
+    if (!match) return null;
+    const name = match[1].trim();
+
+    // Filter exact-match non-person denylist.
+    if (NON_PERSON_NAMES.has(name)) return null;
+
+    // Filter out names where the first word is a known place.
+    const firstWord = name.split(' ')[0];
+    if (PLACE_FIRST_WORDS.has(firstWord)) return null;
+
+    return name;
 }
 
 /**
  * Check if a PO looks like internal corporate spend rather than welfare.
  */
 function isInternalCorporate(po) {
-    const combinedDescription = (po.lineItems || [])
-        .map(li => li.description || '')
-        .join(' ');
-    return INTERNAL_CORPORATE_PATTERNS.some(p => p.test(combinedDescription));
+    const text = combinedDescription(po);
+    return INTERNAL_CORPORATE_PATTERNS.some(p => p.test(text));
 }
 
 /**
@@ -101,15 +193,29 @@ function dominantAccountCode(po) {
     return sorted[0] || null;
 }
 
+// -----------------------------------------------------------------------------
+// Classification
+// -----------------------------------------------------------------------------
+
 /**
  * Classify a single PO into an AR welfare category.
- * Returns { category, confidence, reason } or null if should be excluded.
+ * Returns { category, confidence, reason } or { excluded: '...' } if should
+ * not contribute to welfare totals.
  *
  * confidence: 'high' | 'medium' | 'low' — high when supplier + account code agree,
- * medium when only one signal, low when category inferred from weak signals.
+ * medium when only one strong signal, low when category inferred weakly.
+ *
+ * Rule order (most specific to least):
+ *   1. Status-based exclusions (draft/cancelled/rejected)
+ *   2. Internal corporate exclusion
+ *   3. Supplier + account combos (Day 3)       ← high confidence
+ *   4. Supplier-name hints                     ← high confidence
+ *   5. Account-code inference                  ← medium/low confidence
+ *   6. Recipient-fallback (Day 3)              ← medium confidence
+ *   7. Uncategorised
  */
 function classifyPO(po) {
-    // Exclude drafts and cancelled
+    // Step 1: Exclude non-final statuses.
     if (po.requestStatus === 'draft')     return { excluded: 'draft' };
     if (po.requestStatus === 'cancelled') return { excluded: 'cancelled' };
     if (po.requestStatus === 'rejected')  return { excluded: 'rejected' };
@@ -118,12 +224,24 @@ function classifyPO(po) {
     const dominantAcct = dominantAccountCode(po);
     const accountCode = dominantAcct ? dominantAcct.accountCode : null;
 
-    // Step 1: Check for internal corporate spend first - exclude these.
+    // Step 2: Internal corporate spend — exclude from welfare totals.
     if (isInternalCorporate(po)) {
         return { excluded: 'internal_corporate' };
     }
 
-    // Step 2: Supplier-name hints (highest signal).
+    // Step 3: Supplier + account code high-confidence combos.
+    // Checked BEFORE supplier-name-only hints because pairing is more specific.
+    for (const combo of SUPPLIER_ACCOUNT_COMBOS) {
+        if (combo.supplierPattern.test(supplier) && combo.accountCodes.includes(accountCode)) {
+            return {
+                category: combo.category,
+                confidence: combo.confidence,
+                reason: combo.reason
+            };
+        }
+    }
+
+    // Step 4: Supplier-name hints.
     for (const hint of SUPPLIER_CATEGORY_HINTS) {
         if (hint.pattern.test(supplier)) {
             return {
@@ -134,8 +252,8 @@ function classifyPO(po) {
         }
     }
 
-    // Step 3: Account code inference (medium signal).
-    // 64605 Travel = Transport Assistance (if no supplier match above)
+    // Step 5: Account code inference.
+    // 64605 Travel → Transport Assistance (medium).
     if (accountCode === '64605') {
         return {
             category: 'Transport Assistance',
@@ -144,8 +262,9 @@ function classifyPO(po) {
         };
     }
 
-    // 63950 Meeting Expenses with a recipient name = Family Charitable Payments
-    // (this covers the "Fuel to X", "Goods to X" pattern observed in sample)
+    // 63950 Meeting Expenses:
+    //   + recipient → Family Charitable Payments (medium)
+    //   - recipient → Social & Cultural Programs (low, assumed catering)
     if (accountCode === '63950') {
         const recipient = extractRecipient(po);
         if (recipient) {
@@ -155,7 +274,6 @@ function classifyPO(po) {
                 reason: 'account 63950 + extracted recipient name'
             };
         }
-        // 63950 without a recipient is probably internal meeting catering
         return {
             category: 'Social & Cultural Programs',
             confidence: 'low',
@@ -163,13 +281,31 @@ function classifyPO(po) {
         };
     }
 
-    // Step 4: Unmatched. Return as uncategorised so we can inspect and tune.
+    // Step 6: Recipient-name fallback (Day 3).
+    // If we can extract a named recipient and the spend isn't internal, treat
+    // as Family Charitable with medium confidence. Catches the long tail of
+    // "goods/fuel/tent to [Name]" PO descriptions on account codes that don't
+    // map cleanly to any specific rule above.
+    const fallbackRecipient = extractRecipient(po);
+    if (fallbackRecipient) {
+        return {
+            category: 'Family Charitable Payments',
+            confidence: 'medium',
+            reason: `recipient "${fallbackRecipient}" extracted (supplier/account not in specific rules)`
+        };
+    }
+
+    // Step 7: Unmatched. Return as uncategorised so we can inspect and tune.
     return {
         category: 'Uncategorised',
         confidence: 'none',
         reason: `no match: supplier="${supplier}", accountCode=${accountCode}`
     };
 }
+
+// -----------------------------------------------------------------------------
+// Main entry point
+// -----------------------------------------------------------------------------
 
 /**
  * Main entry point. Given an array of raw Aboriginal Corp POs from AM,
@@ -335,17 +471,22 @@ function buildWelfareSummary(pos, opts = {}) {
         methodology: {
             note: 'Heuristic classifier. Confidence levels per category indicate signal strength. Uncategorised bucket contains unmatched POs for tuning. See SAMPLING_FINDINGS.md §3-4 for rules.',
             rules: [
-                'Supplier name pattern match (e.g. Gove Transport → Transport Assistance): confidence=high',
-                'Account code 64605 Travel (no supplier match): confidence=medium, Transport Assistance',
-                'Account 63950 + "to/for [Name]" recipient: confidence=medium, Family Charitable Payments',
-                'Account 63950 without recipient: confidence=low, Social & Cultural Programs (assumed catering)',
+                'Internal corporate exclusion: vehicle regos, office/boardroom/staff-meeting keywords, "pick up by RAC"',
+                'Supplier + account combo (high): Yirrkala Ent + 250xx → Family Charitable; BP + 63415 → Family Charitable; Gove Warehouse + 64480 → Whitegoods',
+                'Supplier name hint (high): Gove Transport/taxi → Transport; Air Frontier/Black Diamond/MAF → Transport; funeral/memorial → Family Funeral Support; medical/chemist → Medical; Harvey Norman/The Good Guys → Whitegoods',
+                'Account code 64605 Travel → Transport Assistance (medium)',
+                'Account 63950 + recipient → Family Charitable (medium); without recipient → Social & Cultural (low)',
+                'Recipient-fallback: any extractable "to/for/passenger [Name]" → Family Charitable (medium)',
                 'Everything else: Uncategorised — inspect sampleDescriptions to tune rules'
             ]
         }
     };
 }
 
-// Helpers
+// -----------------------------------------------------------------------------
+// Small helpers
+// -----------------------------------------------------------------------------
+
 function round2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
 function round1(n) { return Math.round((n + Number.EPSILON) * 10) / 10; }
 
