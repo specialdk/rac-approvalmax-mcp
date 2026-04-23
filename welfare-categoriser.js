@@ -55,16 +55,38 @@ const SUPPLIER_ACCOUNT_COMBOS = [
     }
 ];
 
+// Supplier name patterns that indicate a category regardless of account code.
+// Ordered by specificity - first match wins.
+//
+// These fire BEFORE account-code family hints (Day 3c), so that e.g. an
+// MAF International flight coded to a 250xx voucher account still gets
+// classified as Transport Assistance (matching the AR's line-item split)
+// rather than Family Charitable. The rule of thumb: if we already know the
+// supplier is specifically a transport/funeral/medical/whitegoods vendor,
+// that trumps the account code.
+const SUPPLIER_CATEGORY_HINTS = [
+    // Road transport
+    { pattern: /gove transport|taxi|letsgo/i,     category: 'Transport Assistance' },
+    // Aviation / charter
+    { pattern: /air frontier|black diamond aviation|maf international|nhulunbuy air|\bhm air\b/i, category: 'Transport Assistance' },
+    // Funeral / memorial
+    { pattern: /funeral|memorial/i,               category: 'Family Funeral Support' },
+    // Medical / pharmacy
+    { pattern: /medical|pharma|chemist|clinic|hospital/i, category: 'Medical & Terminally Ill' },
+    // Whitegoods / large-appliance retail
+    { pattern: /harvey norman|the good guys|appliances online|bing lee/i, category: 'Whitegoods' }
+];
+
 // Account code family → category hints.
-// Fires after supplier+account combos (more specific) but before the generic
-// supplier-name hints. Useful when a code family consistently maps to one
-// welfare category regardless of supplier.
+// Fires AFTER supplier-name hints (so aviation/funeral/medical suppliers win
+// regardless of account code) but BEFORE account-code-specific fallbacks.
+// Useful when a code family consistently maps to one welfare category for
+// everyone *except* specific supplier types.
 //
 // Day 3 sampling: the 250xx code family (25002 through 25009 sighted across
 // samples) is RAC's chart-of-accounts family for member charitable vouchers.
 // Used across many suppliers — Yirrkala Enterprises, BP Nhulunbuy, Elcho Group
-// / Bottom Shop, Gove Warehouse, Arnhemland Progress, etc. — so a
-// supplier-agnostic rule on the code is cleaner than listing suppliers.
+// / Bottom Shop, Gove Warehouse, Arnhemland Progress, etc.
 const ACCOUNT_CODE_CATEGORY_HINTS = [
     {
         pattern: /^250\d{2}$/,
@@ -74,34 +96,34 @@ const ACCOUNT_CODE_CATEGORY_HINTS = [
     }
 ];
 
-// Supplier name patterns that indicate a category regardless of account code.
-// Ordered by specificity - first match wins.
-const SUPPLIER_CATEGORY_HINTS = [
-    // Road transport
-    { pattern: /gove transport|taxi|letsgo/i,     category: 'Transport Assistance' },
-    // Aviation / charter (Day 3: needed so recipient-fallback doesn't misfile
-    // charter flights as Family Charitable)
-    { pattern: /air frontier|black diamond aviation|maf international|nhulunbuy air/i, category: 'Transport Assistance' },
-    // Funeral / memorial
-    { pattern: /funeral|memorial/i,               category: 'Family Funeral Support' },
-    // Medical / pharmacy
-    { pattern: /medical|pharma|chemist|clinic|hospital/i, category: 'Medical & Terminally Ill' },
-    // Whitegoods / large-appliance retail
-    { pattern: /harvey norman|the good guys|appliances online|bing lee/i, category: 'Whitegoods' }
-];
-
-// Internal corporate spend patterns - these POs are NOT welfare even though
-// they appear in Aboriginal Corp. Detected by description keywords that name
-// corporate assets (vehicle regos, office/building work, RAC staff pickups).
-const INTERNAL_CORPORATE_PATTERNS = [
+// Internal corporate spend patterns (description-based).
+// These POs are NOT welfare even though they appear in Aboriginal Corp.
+// Detected by description keywords that name corporate assets or activities
+// (vehicle regos, office/building work, RAC staff pickups).
+const INTERNAL_CORPORATE_DESCRIPTION_PATTERNS = [
     /\b[A-Z]{2}\d{2}[A-Z]{2}\b/,              // NT vehicle rego pattern (e.g. CE03AQ)
     /\bstandard service\b/i,
     /\boffice\b/i,
     /\bboardroom\b/i,
     /\bstaff meeting\b/i,
-    /\bpick ?up by rac\b/i,                   // Day 3: "Pick up by RAC Staff"
+    /\bpick ?up by rac\b/i,                   // Day 3a: "Pick up by RAC Staff"
     /\bfor rac staff\b/i,
     /\brac office\b/i
+];
+
+// Internal corporate spend patterns (supplier-based).
+// Suppliers that are either other RAC trading entities (intercompany billing)
+// or operational service providers for non-welfare activities (printing,
+// signage, IT, framing, postage). These are almost never true welfare spend.
+// Added Day 3c after sampling exposed $125K+ from these suppliers in the
+// Uncategorised bucket.
+const INTERNAL_CORPORATE_SUPPLIER_PATTERNS = [
+    /^rirratjingu /i,        // Intercompany: RAC's own trading entities
+    /\bzip print\b/i,
+    /\bdon whyte\b/i,        // Don Whyte Framing
+    /\bthe pin factory\b/i,
+    /\ball flags and signs\b/i,
+    /\bbz technology\b/i
 ];
 
 // Primary recipient extractor. Matches:
@@ -110,16 +132,17 @@ const INTERNAL_CORPORATE_PATTERNS = [
 //   "to First M Last"           → "First M Last"   (middle initial, with or without period)
 //   "to First Middle Last"      → "First Middle Last"
 //   "passenger: First Last"     → "First Last"
-//   "required by First Last"    → "First Last"    (Day 3 - added after second sampling)
+//   "required by First Last"    → "First Last"
+//   "requested by First Last"   → "First Last"     (Day 3c)
 //   optional "... and Family" / "... & Family" suffix
 //
 // History:
-//   Day 2: base pattern matched "to/for [Name]" only.
+//   Day 2:  base pattern matched "to/for [Name]" only.
 //   Day 3a: added middle-initial branch ([A-Z]\.?), "passenger:" prefix,
 //           case-insensitive "[Ff]amily" suffix.
-//   Day 3b: added "required by" prefix — dominant phrasing discovered after
-//           second sampling (6 of 10 uncategorised POs used this pattern).
-const RECIPIENT_REGEX = /\b(?:[Tt]o|[Ff]or|[Pp]assenger|[Rr]equired\s+[Bb]y)\b[:\s]+([A-Z][a-z]+(?:\s+(?:[A-Z]\.?|[A-Z][a-z]+))*\s+[A-Z][a-z]+(?:\s+(?:&|and)\s+[Ff]amily)?)/;
+//   Day 3b: added "required by" prefix — dominant phrasing after 2nd sampling.
+//   Day 3c: added "requested by" (alternative verb, same structure).
+const RECIPIENT_REGEX = /\b(?:[Tt]o|[Ff]or|[Pp]assenger|[Rr]equ(?:ired|ested)\s+[Bb]y)\b[:\s]+([A-Z][a-z]+(?:\s+(?:[A-Z]\.?|[A-Z][a-z]+))*\s+[A-Z][a-z]+(?:\s+(?:&|and)\s+[Ff]amily)?)/;
 
 // Strings that the regex may extract but which are not actual people.
 // These are places, supplier names, project names, or generic nouns that
@@ -194,10 +217,19 @@ function extractRecipient(po) {
 
 /**
  * Check if a PO looks like internal corporate spend rather than welfare.
+ * Checks both supplier name and description text against their respective
+ * pattern lists.
  */
 function isInternalCorporate(po) {
+    const supplier = po.contact || '';
+    if (INTERNAL_CORPORATE_SUPPLIER_PATTERNS.some(p => p.test(supplier))) {
+        return true;
+    }
     const text = combinedDescription(po);
-    return INTERNAL_CORPORATE_PATTERNS.some(p => p.test(text));
+    if (INTERNAL_CORPORATE_DESCRIPTION_PATTERNS.some(p => p.test(text))) {
+        return true;
+    }
+    return false;
 }
 
 /**
@@ -230,13 +262,13 @@ function dominantAccountCode(po) {
  *
  * Rule order (most specific to least):
  *   1. Status-based exclusions (draft/cancelled/rejected)
- *   2. Internal corporate exclusion
- *   3a. Supplier + account combos                ← high confidence
- *   3b. Account-code family hints (Day 3b)       ← high confidence
- *   4. Supplier-name hints                       ← high confidence
- *   5. Account-code inference                    ← medium/low confidence
- *   6. Recipient-fallback                        ← medium confidence
- *   7. Uncategorised
+ *   2. Internal corporate exclusion (supplier- or description-based)
+ *   3. Supplier + account combos                ← high confidence
+ *   4. Supplier-name hints                      ← high confidence
+ *   5. Account-code family hints (e.g. 250xx)   ← high confidence
+ *   6. Account-code specific (64605, 63950)     ← medium/low confidence
+ *   7. Recipient-fallback                       ← medium confidence
+ *   8. Uncategorised
  */
 function classifyPO(po) {
     // Step 1: Exclude non-final statuses.
@@ -253,7 +285,7 @@ function classifyPO(po) {
         return { excluded: 'internal_corporate' };
     }
 
-    // Step 3a: Supplier + account code high-confidence combos.
+    // Step 3: Supplier + account code high-confidence combos.
     for (const combo of SUPPLIER_ACCOUNT_COMBOS) {
         if (combo.supplierPattern.test(supplier) && combo.accountCodes.includes(accountCode)) {
             return {
@@ -264,18 +296,9 @@ function classifyPO(po) {
         }
     }
 
-    // Step 3b: Account-code family hints (e.g. any supplier + 250xx → charitable).
-    for (const hint of ACCOUNT_CODE_CATEGORY_HINTS) {
-        if (accountCode && hint.pattern.test(accountCode)) {
-            return {
-                category: hint.category,
-                confidence: hint.confidence,
-                reason: hint.reason
-            };
-        }
-    }
-
     // Step 4: Supplier-name hints.
+    // Fires before account-code hints so known transport/funeral/medical
+    // suppliers route to their specific AR line even if coded to 250xx.
     for (const hint of SUPPLIER_CATEGORY_HINTS) {
         if (hint.pattern.test(supplier)) {
             return {
@@ -286,7 +309,18 @@ function classifyPO(po) {
         }
     }
 
-    // Step 5: Account code inference.
+    // Step 5: Account-code family hints (e.g. any supplier + 250xx → charitable).
+    for (const hint of ACCOUNT_CODE_CATEGORY_HINTS) {
+        if (accountCode && hint.pattern.test(accountCode)) {
+            return {
+                category: hint.category,
+                confidence: hint.confidence,
+                reason: hint.reason
+            };
+        }
+    }
+
+    // Step 6: Account-code specific inference.
     // 64605 Travel → Transport Assistance (medium).
     if (accountCode === '64605') {
         return {
@@ -315,7 +349,7 @@ function classifyPO(po) {
         };
     }
 
-    // Step 6: Recipient-name fallback.
+    // Step 7: Recipient-name fallback.
     // If we can extract a named recipient and the spend isn't internal, treat
     // as Family Charitable with medium confidence. Catches long-tail "goods/
     // fuel/tent to [Name]" descriptions on account codes not covered above.
@@ -328,7 +362,7 @@ function classifyPO(po) {
         };
     }
 
-    // Step 7: Unmatched. Return as uncategorised so we can inspect and tune.
+    // Step 8: Unmatched. Return as uncategorised so we can inspect and tune.
     return {
         category: 'Uncategorised',
         confidence: 'none',
@@ -504,13 +538,13 @@ function buildWelfareSummary(pos, opts = {}) {
         methodology: {
             note: 'Heuristic classifier. Confidence levels per category indicate signal strength. Uncategorised bucket contains unmatched POs for tuning. See SAMPLING_FINDINGS.md §3-4 for rules.',
             rules: [
-                'Internal corporate exclusion: vehicle regos, office/boardroom/staff-meeting keywords, "pick up by RAC"',
+                'Internal corporate exclusion: NT vehicle regos, office/boardroom/staff-meeting keywords, "pick up by RAC"; intercompany Rirratjingu suppliers; printing/signage/IT vendors',
                 'Supplier + account combo (high): BP + 63415 → Family Charitable; Gove Warehouse + 64480 → Whitegoods',
-                'Account code family (high): 250xx → Family Charitable Payments (member voucher, supplier-agnostic)',
-                'Supplier name hint (high): Gove Transport/taxi → Transport; Air Frontier/Black Diamond/MAF → Transport; funeral/memorial → Family Funeral Support; medical/chemist → Medical; Harvey Norman/The Good Guys → Whitegoods',
+                'Supplier name hint (high): Gove Transport/taxi → Transport; Air Frontier/Black Diamond/MAF/HM Air → Transport; funeral/memorial → Family Funeral Support; medical/chemist → Medical; Harvey Norman/The Good Guys → Whitegoods',
+                'Account code family (high): 250xx → Family Charitable Payments (member voucher, supplier-agnostic — fires after supplier hints so aviation/funeral/medical win)',
                 'Account code 64605 Travel → Transport Assistance (medium)',
                 'Account 63950 + recipient → Family Charitable (medium); without recipient → Social & Cultural (low)',
-                'Recipient-fallback: any extractable "to/for/passenger/required by [Name]" → Family Charitable (medium)',
+                'Recipient-fallback: any extractable "to/for/passenger/required by/requested by [Name]" → Family Charitable (medium)',
                 'Everything else: Uncategorised — inspect sampleDescriptions to tune rules'
             ]
         }
