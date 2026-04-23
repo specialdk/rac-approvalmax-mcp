@@ -100,16 +100,22 @@ async function fetchProfitLoss(orgName, periodMonths = 10, date) {
 }
 
 // Sum a Xero BudgetSummary report into { revenue, expenses, netProfit }.
-// The report has nested Sections (Income, Operating Expenses, Net Profit);
-// each Row's cells are [accountName, month1, month2, ...]. We sum non-total
-// rows within Income and Expense sections across all periods shown.
+// The report has nested Sections (Income, Operating Expenses, Cost of Sales,
+// Net Profit); each Row's cells are [accountName, month1, month2, ...].
+// We sum non-total rows within Income and Expense sections across all
+// periods shown.
 //
 // IMPORTANT: income section match is EXACT (not substring). Day 3j sanity
 // check found title.includes('income') double-counted rollup sections like
 // "Net Income" and "Gross Profit" on top of the actual "Income" section,
-// inflating revenue ~2.2x. Expense side uses substring and works correctly
-// because Xero only emits one "Operating Expenses" / "Less Operating
-// Expenses" / "Cost of Sales" section per report — no expense rollups.
+// inflating revenue ~2.2x.
+//
+// Expense side uses substring against 'expense' AND 'cost of' so we catch
+// both "Operating Expenses"/"Less Operating Expenses" AND "Cost of Sales"/
+// "Less Cost of Sales"/"Cost of Goods Sold". Without the 'cost of' clause,
+// trading entities (Enterprises, Mining, Property Mgmt) under-reported
+// budgeted costs because their COGS lived in a separate section.
+//
 // The matchedSections diagnostic in the return value lets us verify which
 // section titles were summed without redeploying.
 function parseBudgetReport(report) {
@@ -124,7 +130,7 @@ function parseBudgetReport(report) {
         const title = (section.title || '').toLowerCase();
 
         const isIncome  = title === 'income' || title === 'revenue' || title === 'trading income';
-        const isExpense = title.includes('expense');
+        const isExpense = title.includes('expense') || title.includes('cost of');
         if (!isIncome && !isExpense) continue;
 
         (isIncome ? matchedSections.income : matchedSections.expense).push(section.title);
