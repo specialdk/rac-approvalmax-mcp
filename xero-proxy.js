@@ -1,156 +1,213 @@
-// xero-proxy.js
-// Server-to-server proxy to the RAC Xero API (rac-xero-api-matt on Railway).
-// Exposes GET /api/xero/budget-vs-actual returning FY26 budget + YTD actuals
-// for all 5 AM entities.
+// xero-proxy.js (Day 3j)
+//
+// Server-side proxy to Matt's Xero API (rac-xero-api-matt). Lets the AM
+// dashboard show FY26 Budget vs Actual per entity without hitting Matt's
+// server directly from the browser (which would fail CORS).
+//
+// Wired into server.js by registering the handler on /api/budget-vs-actual.
+// Placement matters: the route must be registered BEFORE /api/xero/:type,
+// otherwise Express's wildcard matcher captures "budget-vs-actual" as :type.
 
-const express = require('express');
 const fetch = require('node-fetch');
 
-const router = express.Router();
+// Matt's Xero API base URL. Override via env if needed.
+const XERO_API_BASE = process.env.XERO_API_BASE || 'https://rac-xero-api-matt-production.up.railway.app';
 
-const XERO_API_BASE = process.env.XERO_API_BASE
-    || 'https://rac-xero-api-matt-production.up.railway.app';
-
-const ENTITY_XERO_ORG_NAME = {
-    'aborig':      'Aboriginal Corporation',
-    'enterprises': 'Enterprises',
-    'rpmms':       'Property Management',
-    'mining':      'Mining',
-    'invest':      'Miliditjpi'
+// Maps our AM entity keys to distinctive substrings passed as
+// organizationName to Matt's server. Matt does a case-insensitive
+// tenantName.includes() so short substrings work — I've chosen them to
+// avoid collision with other orgs in the connections list.
+const XERO_ORG_NAME_BY_KEY = {
+    aborig:       'Rirratjingu Aboriginal Corporation',
+    enterprises:  'Rirratjingu Enterprises',
+    rpmms:        'Property Management',
+    mining:       'Rirratjingu Mining',
+    invest:       'Miliditjpi'
 };
 
-const cache = new Map();
-const CACHE_TTL_MS = 5 * 60 * 1000;
+// 5-minute in-memory cache keeps dashboard reloads snappy without
+// hammering Matt's server. BI data doesn't change by the second.
+const xeroCache = new Map();
+const XERO_CACHE_TTL_MS = 5 * 60 * 1000;
 
-function getCached(key) {
-    const e = cache.get(key);
+function cacheGet(key) {
+    const e = xeroCache.get(key);
     if (!e) return null;
-    if (Date.now() - e.t > CACHE_TTL_MS) { cache.delete(key); return null; }
-    return e.v;
+    if (Date.now() - e.storedAt > XERO_CACHE_TTL_MS) {
+        xeroCache.delete(key);
+        return null;
+    }
+    return e.value;
 }
-function setCached(key, v) { cache.set(key, { t: Date.now(), v }); }
 
-async function postJson(path, body) {
-    const res = await fetch(`${XERO_API_BASE}${path}`, {
+function cacheSet(key, value) {
+    xeroCache.set(key, { value, storedAt: Date.now() });
+}
+
+// Fetch Xero Budget Summary report from Matt's server.
+// `date` (YYYY-MM-DD) is interpreted by Xero as the START of the window;
+// it returns `periods` months forward from there. For full FY26 we pass
+// date='2025-07-01' periods=12 to get Jul 2025 - Jun 2026.
+async function fetchBudgetSummary(orgName, date, periods = 12) {
+    const key = `budget:${orgName}:${date || 'def'}:${periods}`;
+    const cached = cacheGet(key);
+    if (cached) return cached;
+
+    const body = { organizationName: orgName, periods };
+    if (date) body.date = date;
+
+    const res = await fetch(`${XERO_API_BASE}/api/budget-summary`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
     });
+
     if (!res.ok) {
-        const txt = await res.text().catch(() => '');
-        throw new Error(`Xero ${path} returned ${res.status}: ${txt.slice(0, 300)}`);
+        const errText = await res.text().catch(() => '');
+        throw new Error(`Xero budget-summary ${res.status}: ${errText.slice(0, 200)}`);
     }
-    return res.json();
+
+    const data = await res.json();
+    cacheSet(key, data);
+    return data;
 }
 
-function parseBudgetReport(report) {
-    const result = { income: 0, operatingExpenses: 0, incomeAccounts: [], expenseAccounts: [], reportDate: null, reportTitles: null };
-    if (!report || !Array.isArray(report.rows)) return result;
-    result.reportDate = report.reportDate || null;
-    result.reportTitles = report.reportTitles || null;
+// Fetch P&L summary from Matt's server. Returns pre-parsed structure:
+// { summary: { totalRevenue, totalExpenses, grossProfit, netProfit, ... },
+//   period: { from, to, months, description } }
+async function fetchProfitLoss(orgName, periodMonths = 10, date) {
+    const key = `pl:${orgName}:${periodMonths}:${date || 'def'}`;
+    const cached = cacheGet(key);
+    if (cached) return cached;
 
-    for (const section of report.rows) {
-        if (section.rowType !== 'Section') continue;
+    const body = { organizationName: orgName, periodMonths };
+    if (date) body.date = date;
+
+    const res = await fetch(`${XERO_API_BASE}/api/profit-loss-summary`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+
+    if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(`Xero P&L ${res.status}: ${errText.slice(0, 200)}`);
+    }
+
+    const data = await res.json();
+    cacheSet(key, data);
+    return data;
+}
+
+// Sum a Xero BudgetSummary report into { revenue, expenses, netProfit }.
+// The report has nested Sections (Income, Operating Expenses, Net Profit);
+// each Row's cells are [accountName, month1, month2, ...]. We sum non-total
+// rows within Income and Expense sections across all periods shown.
+function parseBudgetReport(report) {
+    let revenue = 0;
+    let expenses = 0;
+
+    const rows = report?.rows || [];
+
+    for (const section of rows) {
+        if (section.rowType !== 'Section' || !Array.isArray(section.rows)) continue;
         const title = (section.title || '').toLowerCase();
-        const isIncome = title === 'income' || title === 'revenue' || title.includes('income');
-        const isExpense = title.includes('expense') || title.includes('cost of') || title.includes('operating');
+
+        const isIncome  = title.includes('income') || title.includes('revenue');
+        const isExpense = title.includes('expense');
         if (!isIncome && !isExpense) continue;
 
-        for (const row of (section.rows || [])) {
-            if (row.rowType !== 'Row') continue;
-            const cells = row.cells || [];
-            if (cells.length < 2) continue;
-            const accountName = (cells[0] && cells[0].value) || 'Unknown';
-            let rowTotal = 0;
-            for (let i = 1; i < cells.length; i++) {
-                const v = parseFloat(cells[i] && cells[i].value);
-                if (!isNaN(v)) rowTotal += v;
+        for (const row of section.rows) {
+            if (row.rowType !== 'Row' || !Array.isArray(row.cells)) continue;
+            const accountName = (row.cells[0]?.value || '').toLowerCase();
+            if (accountName.startsWith('total')) continue;  // skip subtotals
+
+            let sum = 0;
+            for (let i = 1; i < row.cells.length; i++) {
+                const v = parseFloat(row.cells[i]?.value);
+                if (!isNaN(v)) sum += v;
             }
-            if (isIncome) {
-                result.income += rowTotal;
-                if (rowTotal !== 0) result.incomeAccounts.push({ name: accountName, total: rowTotal });
-            } else if (isExpense) {
-                result.operatingExpenses += rowTotal;
-                if (rowTotal !== 0) result.expenseAccounts.push({ name: accountName, total: rowTotal });
-            }
+
+            if (isIncome) revenue += sum;
+            else expenses += sum;
         }
     }
-    result.incomeAccounts.sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
-    result.expenseAccounts.sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
-    return result;
+
+    const r2 = n => Math.round(n * 100) / 100;
+    return {
+        revenue: r2(revenue),
+        expenses: r2(expenses),
+        netProfit: r2(revenue - expenses)
+    };
 }
 
-function computeMonthsElapsed(fyStartIso, today = new Date()) {
-    const fyStart = new Date(fyStartIso);
-    const months = (today.getFullYear() - fyStart.getFullYear()) * 12
-        + (today.getMonth() - fyStart.getMonth()) + 1;
-    return Math.max(1, Math.min(12, months));
-}
-
-router.get('/api/xero/budget-vs-actual', async (req, res) => {
-    const cacheKey = 'budget-vs-actual-fy26';
+// Express route handler: GET /api/budget-vs-actual
+// Returns budget+actual for all 5 AM entities in parallel.
+// Query param: asOfDate (YYYY-MM-DD, defaults to today).
+async function handleBudgetVsActual(req, res) {
     try {
-        if (!req.query.nocache) {
-            const cached = getCached(cacheKey);
-            if (cached) return res.json({ ...cached, fromCache: true });
-        }
-        const fyStart = '2025-07-01';
-        const budgetPeriods = 12;
-        const monthsElapsed = computeMonthsElapsed(fyStart);
-        const entries = Object.entries(ENTITY_XERO_ORG_NAME);
+        const asOfDate = req.query.asOfDate || new Date().toISOString().slice(0, 10);
+        const fyStart  = '2025-07-01';
+        const fyEnd    = '2026-06-30';
 
-        console.log(`[xero-proxy] Fetching budget + P&L for ${entries.length} entities, monthsElapsed=${monthsElapsed}`);
+        const startD = new Date(fyStart);
+        const nowD   = new Date(asOfDate);
+        const monthsElapsed = Math.min(12, Math.max(1,
+            (nowD.getFullYear() - startD.getFullYear()) * 12 +
+            (nowD.getMonth() - startD.getMonth()) + 1
+        ));
 
-        const results = await Promise.all(entries.map(async ([entityKey, orgName]) => {
+        const keys = Object.keys(XERO_ORG_NAME_BY_KEY);
+        console.log(`[budget-vs-actual] ${keys.length} entities, asOf=${asOfDate}, monthsElapsed=${monthsElapsed}`);
+
+        const results = await Promise.all(keys.map(async (key) => {
+            const orgName = XERO_ORG_NAME_BY_KEY[key];
             try {
-                const [budgetRes, plRes] = await Promise.all([
-                    postJson('/api/budget-summary', { organizationName: orgName, date: fyStart, periods: budgetPeriods }),
-                    postJson('/api/profit-loss-summary', { organizationName: orgName, periodMonths: monthsElapsed })
+                const [budgetData, plData] = await Promise.all([
+                    fetchBudgetSummary(orgName, fyStart, 12),
+                    fetchProfitLoss(orgName, monthsElapsed)
                 ]);
-                const budget = parseBudgetReport(budgetRes.report);
-                const plSummary = plRes.summary || {};
+
+                const budget = parseBudgetReport(budgetData.report);
+                const actual = plData.summary || {};
+                const r2 = n => Math.round((n || 0) * 100) / 100;
+
                 return {
-                    entityKey,
+                    entityKey: key,
                     organizationName: orgName,
-                    period: plRes.period || { months: monthsElapsed },
-                    fy26Budget: {
-                        revenue: Math.round(budget.income),
-                        expenses: Math.round(budget.operatingExpenses),
-                        netProfit: Math.round(budget.income - budget.operatingExpenses)
-                    },
+                    fy26Budget: budget,
                     ytdActual: {
-                        revenue: Math.round(plSummary.totalRevenue || 0),
-                        expenses: Math.round(plSummary.totalExpenses || 0),
-                        grossProfit: Math.round(plSummary.grossProfit || 0),
-                        netProfit: Math.round(plSummary.netProfit || 0)
-                    },
-                    diagnostic: {
-                        budgetReportDate: budget.reportDate,
-                        budgetReportTitles: budget.reportTitles,
-                        budgetIncomeAccountCount: budget.incomeAccounts.length,
-                        budgetExpenseAccountCount: budget.expenseAccounts.length
+                        revenue: r2(actual.totalRevenue),
+                        expenses: r2(actual.totalExpenses),
+                        grossProfit: r2(actual.grossProfit),
+                        netProfit: r2(actual.netProfit),
+                        periodDescription: plData.period?.description || null
                     }
                 };
             } catch (err) {
-                console.error(`[xero-proxy] ${orgName} error:`, err.message);
-                return { entityKey, organizationName: orgName, error: err.message };
+                console.error(`[budget-vs-actual] ${key} (${orgName}): ${err.message}`);
+                return { entityKey: key, organizationName: orgName, error: err.message };
             }
         }));
 
-        const payload = {
+        res.json({
             success: true,
             generatedAt: new Date().toISOString(),
-            fyLabel: 'FY26',
-            budgetWindow: { anchor: fyStart, periods: budgetPeriods },
-            ytdWindow: { months: monthsElapsed, fyStart },
-            entities: results
-        };
-        setCached(cacheKey, payload);
-        res.json(payload);
-    } catch (error) {
-        console.error('[xero-proxy] Top-level error:', error.message);
-        res.status(500).json({ success: false, error: error.message });
+            period: { fy: 'FY26', fyStart, fyEnd, asOfDate, monthsElapsed },
+            entities: results,
+            cacheSize: xeroCache.size
+        });
+    } catch (err) {
+        console.error(`[budget-vs-actual] Top-level: ${err.message}`);
+        res.status(500).json({ success: false, error: err.message });
     }
-});
+}
 
-module.exports = router;
+module.exports = {
+    handleBudgetVsActual,
+    // exported for testing / future routes:
+    fetchBudgetSummary,
+    fetchProfitLoss,
+    parseBudgetReport,
+    XERO_ORG_NAME_BY_KEY
+};

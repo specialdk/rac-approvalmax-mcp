@@ -1,0 +1,1150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAC Procurement — ApprovalMax Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+    --ink: #141a2a;
+    --ink-soft: #2a3248;
+    --ink-mute: #5b6178;
+    --ink-faint: #8b90a3;
+    --paper: #f7f4ed;
+    --paper-2: #efeadf;
+    --card: #ffffff;
+    --line: #e0dcd1;
+    --line-2: #c9c4b5;
+    --terra: #a23e2c;
+    --terra-soft: #c96b55;
+    --terra-pale: #f3e3dc;
+    --ochre: #b88628;
+    --ochre-pale: #f4e8c9;
+    --moss: #4a6741;
+    --moss-pale: #e1e8d8;
+    --alert: #a23e2c;
+    --warn: #b88628;
+    --ok: #4a6741;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'IBM Plex Sans', sans-serif; font-weight: 300; color: var(--ink); background: var(--paper); line-height: 1.5; font-size: 14px; min-height: 100vh; }
+code, .mono { font-family: 'IBM Plex Mono', monospace; }
+.serif, h1, h2, h3 { font-family: 'IBM Plex Serif', serif; font-weight: 400; color: var(--ink); }
+
+.masthead { background: var(--ink); color: var(--paper); border-bottom: 4px solid var(--terra); }
+.masthead-inner { max-width: 1400px; margin: 0 auto; padding: 18px 32px 0; display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; }
+.mast-title { font-family: 'IBM Plex Serif', serif; font-weight: 400; font-size: 28px; letter-spacing: 0.5px; line-height: 1; color: var(--paper); }
+.mast-subtitle { font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 2.5px; color: var(--paper-2); opacity: 0.6; margin-top: 4px; }
+.mast-meta { font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; text-align: right; color: var(--paper-2); opacity: 0.8; line-height: 1.8; }
+.mast-meta .trial-clock { color: var(--ochre-pale); font-weight: 500; }
+.mast-meta .trial-urgent { color: var(--terra-soft); }
+
+/* Live status pill */
+.status-pill { display: inline-block; padding: 3px 10px; margin-left: 10px; font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 2px; border-radius: 2px; vertical-align: middle; }
+.status-pill.loading { background: var(--ochre); color: var(--ink); animation: pulse 1.6s ease-in-out infinite; }
+.status-pill.live { background: var(--moss); color: var(--paper); }
+.status-pill.error { background: var(--terra); color: var(--paper); }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+.entity-strip { background: var(--ink); max-width: 1400px; margin: 0 auto; padding: 0 32px; display: flex; gap: 0; overflow-x: auto; }
+.entity-tab { background: transparent; border: none; color: var(--paper-2); font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; font-weight: 400; padding: 14px 20px 16px; cursor: pointer; position: relative; transition: color 0.12s; white-space: nowrap; opacity: 0.55; }
+.entity-tab:hover { opacity: 0.9; }
+.entity-tab.active { opacity: 1; color: var(--paper); }
+.entity-tab.active::after { content: ''; position: absolute; bottom: -4px; left: 20px; right: 20px; height: 4px; background: var(--terra); }
+.entity-tab .tab-meta { display: block; font-family: 'IBM Plex Mono', monospace; font-size: 10px; margin-top: 2px; opacity: 0.5; letter-spacing: 1px; }
+
+.preview-banner { background: var(--ochre); color: var(--ink); padding: 6px 32px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 2px; text-align: center; }
+.preview-banner.error { background: var(--terra); color: var(--paper); }
+.preview-banner.live { background: var(--moss); color: var(--paper); }
+.preview-banner a { color: inherit; text-decoration: underline; }
+
+.shell { max-width: 1400px; margin: 0 auto; padding: 32px; }
+
+.kpi-strip { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); margin-bottom: 20px; }
+.kpi { background: var(--paper); padding: 18px 20px; }
+.kpi-label { font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--ink-mute); margin-bottom: 6px; }
+.kpi-value { font-family: 'IBM Plex Serif', serif; font-size: 26px; font-weight: 400; color: var(--ink); line-height: 1.1; }
+.kpi-sub { font-size: 11px; color: var(--ink-faint); margin-top: 4px; }
+.kpi-value.alert { color: var(--terra); }
+.kpi-value.warn { color: var(--ochre); }
+
+.section-head { border-top: 2px solid var(--ink); padding-top: 14px; margin: 32px 0 16px; display: flex; align-items: baseline; justify-content: space-between; }
+.section-head h2 { font-size: 22px; letter-spacing: 0.3px; }
+.section-head .section-kicker { font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 2px; color: var(--terra); }
+
+.gov-toggle-row { margin-bottom: 24px; }
+.gov-toggle { background: transparent; border: 1px solid var(--line-2); color: var(--ink-mute); padding: 10px 16px; cursor: pointer; font-family: 'IBM Plex Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; width: 100%; text-align: left; transition: background 0.15s, color 0.15s; display: flex; justify-content: space-between; align-items: center; }
+.gov-toggle:hover { background: var(--paper-2); color: var(--ink); }
+.gov-toggle .gov-toggle-right { font-weight: 400; opacity: 0.8; }
+.gov-strip { background: var(--terra-pale); border-left: 4px solid var(--terra); padding: 16px 20px; display: grid; grid-template-columns: 1fr 2fr; gap: 24px; align-items: center; margin-top: 8px; }
+.gov-strip.hidden { display: none; }
+.gov-title { font-family: 'IBM Plex Serif', serif; font-size: 15px; font-weight: 500; color: var(--terra); margin-bottom: 4px; }
+.gov-body { font-size: 13px; color: var(--ink-soft); line-height: 1.6; }
+.gov-body em { color: var(--ink-mute); font-style: italic; }
+.gov-metrics { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+.gov-metric { text-align: center; background: var(--paper); padding: 8px 10px; border: 1px solid var(--line); }
+.gov-metric-name { font-family: 'IBM Plex Mono', monospace; font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--ink-mute); margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gov-metric-val { font-family: 'IBM Plex Serif', serif; font-size: 17px; color: var(--ink); }
+.gov-metric-pct { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--terra); margin-top: 2px; }
+
+.entity-panel { display: none; }
+.entity-panel.active { display: block; }
+
+.panel-hero { background: var(--card); border: 1px solid var(--line); border-top: 4px solid var(--terra); padding: 24px 28px; margin-bottom: 24px; display: grid; grid-template-columns: 2fr 1fr; gap: 32px; }
+.panel-kicker { font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 2.5px; color: var(--terra); margin-bottom: 6px; }
+.panel-title { font-family: 'IBM Plex Serif', serif; font-size: 28px; font-weight: 400; margin-bottom: 8px; line-height: 1.2; }
+.panel-standfirst { font-family: 'IBM Plex Serif', serif; font-size: 15px; font-style: italic; color: var(--ink-soft); line-height: 1.6; max-width: 58ch; }
+.panel-standfirst .dyn { font-style: normal; font-weight: 500; color: var(--ink); }
+.panel-quickstats { border-left: 1px solid var(--line-2); padding-left: 24px; display: flex; flex-direction: column; justify-content: center; gap: 12px; }
+.quickstat-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; padding-bottom: 8px; border-bottom: 1px dotted var(--line); }
+.quickstat-row:last-child { border-bottom: none; padding-bottom: 0; }
+.quickstat-label { font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--ink-mute); }
+.quickstat-val { font-family: 'IBM Plex Serif', serif; font-size: 16px; }
+
+.content-grid { display: grid; grid-template-columns: 3fr 2fr; gap: 24px; margin-bottom: 24px; }
+
+.card { background: var(--card); border: 1px solid var(--line); padding: 22px 24px; }
+.card-head { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 14px; }
+.card-title { font-family: 'IBM Plex Serif', serif; font-size: 16px; font-weight: 500; }
+.card-meta { font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--ink-mute); }
+
+.data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.data-table th { font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--ink-mute); font-weight: 400; text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.data-table th.num { text-align: right; }
+.data-table td { padding: 9px 8px; border-bottom: 1px dotted var(--line); vertical-align: top; }
+.data-table td.num { text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
+.data-table td.mono-small { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--ink-mute); }
+.data-table tr:last-child td { border-bottom: none; }
+.data-table .supplier-name { font-weight: 400; }
+.data-table .account-desc { font-size: 11px; color: var(--ink-mute); }
+.data-table .family-row td:first-child { font-family: 'IBM Plex Serif', serif; font-weight: 500; font-size: 14px; }
+.data-table .placeholder-row td { color: var(--ink-faint); font-style: italic; text-align: center; padding: 20px; }
+
+.welfare-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); }
+.welfare-card { background: var(--paper); padding: 16px 18px; min-height: 120px; display: flex; flex-direction: column; justify-content: space-between; }
+.welfare-card-name { font-family: 'IBM Plex Serif', serif; font-size: 14px; font-weight: 500; color: var(--ink); margin-bottom: 6px; line-height: 1.3; }
+.welfare-card-ytd { font-family: 'IBM Plex Serif', serif; font-size: 22px; color: var(--ink); line-height: 1; }
+.welfare-card-baseline { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--ink-mute); margin-top: 4px; }
+.welfare-bar { height: 3px; background: var(--line); margin-top: 10px; position: relative; overflow: hidden; }
+.welfare-bar-fill { height: 100%; background: var(--terra); width: 0%; transition: width 0.6s ease-out; }
+.welfare-bar.under .welfare-bar-fill { background: var(--ochre); }
+.welfare-bar.over .welfare-bar-fill { background: var(--terra); }
+.welfare-bar.on .welfare-bar-fill { background: var(--moss); }
+.welfare-card-meta { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--ink-mute); margin-top: 6px; display: flex; justify-content: space-between; }
+
+.conc-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; margin-bottom: 10px; }
+.conc-label { font-size: 13px; }
+.conc-label .sub { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--ink-mute); margin-left: 6px; }
+.conc-val { font-family: 'IBM Plex Mono', monospace; font-size: 12px; text-align: right; white-space: nowrap; }
+.conc-bar { grid-column: 1 / -1; height: 6px; background: var(--paper-2); margin-top: 2px; margin-bottom: 4px; }
+.conc-bar-fill { height: 100%; background: var(--ink); width: 0%; transition: width 0.6s ease-out; }
+
+.overview-entities { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 24px; }
+.overview-entity-card { background: var(--card); border: 1px solid var(--line); border-top: 3px solid var(--ink-mute); padding: 16px; cursor: pointer; transition: border-color 0.15s; }
+.overview-entity-card:hover { border-top-color: var(--terra); }
+.overview-entity-card .oe-name { font-family: 'IBM Plex Serif', serif; font-size: 13px; line-height: 1.25; margin-bottom: 8px; min-height: 34px; }
+.overview-entity-card .oe-val { font-family: 'IBM Plex Serif', serif; font-size: 20px; color: var(--ink); }
+.overview-entity-card .oe-sub { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--ink-mute); margin-top: 2px; }
+.overview-entity-card .oe-story { font-size: 11px; color: var(--ink-soft); font-style: italic; margin-top: 10px; padding-top: 10px; border-top: 1px dotted var(--line); line-height: 1.4; }
+.overview-entity-card.dominant { border-top-color: var(--terra); }
+
+.callout { background: var(--ochre-pale); border-left: 4px solid var(--ochre); padding: 14px 18px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+.callout-title { font-weight: 500; color: var(--ink-soft); }
+.callout-body { color: var(--ink-mute); font-style: italic; }
+
+.todo { background: transparent; border: 1px dashed var(--line-2); padding: 14px 18px; font-size: 12px; color: var(--ink-mute); font-style: italic; margin: 12px 0; }
+.todo strong { font-family: 'IBM Plex Mono', monospace; text-transform: uppercase; letter-spacing: 1.5px; font-size: 10px; font-style: normal; color: var(--terra); margin-right: 8px; }
+
+.auth-prompt { max-width: 500px; margin: 80px auto; background: var(--card); border: 1px solid var(--line); border-top: 4px solid var(--terra); padding: 40px; text-align: center; }
+.auth-prompt h2 { margin-bottom: 16px; font-size: 22px; }
+.auth-prompt p { color: var(--ink-mute); margin-bottom: 24px; line-height: 1.6; }
+.auth-prompt a { display: inline-block; background: var(--terra); color: var(--paper); padding: 12px 24px; text-decoration: none; font-family: 'IBM Plex Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 2px; }
+.auth-prompt a:hover { background: var(--ink); }
+
+.footer { max-width: 1400px; margin: 48px auto 0; padding: 24px 32px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--ink-mute); }
+
+/* Placeholder shimmer for numeric values while loading */
+.dyn-num { display: inline-block; min-width: 40px; color: var(--ink-faint); }
+.dyn-num.loaded { color: inherit; }
+
+@media (max-width: 1100px) {
+    .kpi-strip { grid-template-columns: repeat(3, 1fr); }
+    .content-grid { grid-template-columns: 1fr; }
+    .overview-entities { grid-template-columns: repeat(2, 1fr); }
+    .welfare-grid { grid-template-columns: repeat(2, 1fr); }
+    .panel-hero { grid-template-columns: 1fr; }
+    .panel-quickstats { border-left: none; border-top: 1px solid var(--line-2); padding-left: 0; padding-top: 16px; }
+    .gov-strip { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="masthead">
+    <div class="masthead-inner">
+        <div>
+            <div class="mast-title">Rirratjingu Procurement<span id="statusPill" class="status-pill loading">Loading</span></div>
+            <div class="mast-subtitle">ApprovalMax · cross-entity dashboard</div>
+        </div>
+        <div class="mast-meta">
+            <div>As at <span class="mono" id="asAtDate">—</span></div>
+            <div>FY26 day <span class="mono" id="fyDay">—</span> / 365 · <span class="mono" id="fyPct">—</span> elapsed</div>
+            <div class="trial-clock trial-urgent">AM Premium trial · <span class="mono" id="trialDays">—</span></div>
+        </div>
+    </div>
+    <div class="entity-strip" id="entityStrip">
+        <button class="entity-tab active" data-entity="all">All entities<span class="tab-meta" id="tabMetaAll">— · —</span></button>
+        <button class="entity-tab" data-entity="aborig">Aboriginal Corporation<span class="tab-meta" id="tabMetaAborig">— · —</span></button>
+        <button class="entity-tab" data-entity="enterprises">Enterprises<span class="tab-meta" id="tabMetaEnterprises">— · —</span></button>
+        <button class="entity-tab" data-entity="rpmms">Property Mgmt<span class="tab-meta" id="tabMetaRpmms">— · —</span></button>
+        <button class="entity-tab" data-entity="mining">Mining<span class="tab-meta" id="tabMetaMining">— · —</span></button>
+        <button class="entity-tab" data-entity="invest">Investments (Miliditjpi)<span class="tab-meta" id="tabMetaInvest">— · —</span></button>
+    </div>
+</div>
+<div class="preview-banner" id="previewBanner">Loading live data from ApprovalMax… allow ~60–180s on first load</div>
+
+<div class="shell" id="dashboardShell">
+
+    <div class="kpi-strip">
+        <div class="kpi"><div class="kpi-label">Committed FY26</div><div class="kpi-value" id="kpiCommitted">—</div><div class="kpi-sub">across <span id="kpiEntityCount">—</span> entities, post-AM era</div></div>
+        <div class="kpi"><div class="kpi-label">Total POs</div><div class="kpi-value" id="kpiTotalPos">—</div><div class="kpi-sub">since 1 Jun 2025 (AM cutoff)</div></div>
+        <div class="kpi"><div class="kpi-label">Approved</div><div class="kpi-value" id="kpiApproved">—</div><div class="kpi-sub"><span id="kpiApprovedPct">—</span> of total</div></div>
+        <div class="kpi"><div class="kpi-label">Pending (draft / on-approval)</div><div class="kpi-value warn" id="kpiPending">—</div><div class="kpi-sub"><span id="kpiPendingPct">—</span> — needs review</div></div>
+        <div class="kpi"><div class="kpi-label">Rejected / Cancelled</div><div class="kpi-value alert" id="kpiRejCan">—</div><div class="kpi-sub">see governance detail</div></div>
+        <div class="kpi"><div class="kpi-label">Entities live in AM</div><div class="kpi-value">5 of 7</div><div class="kpi-sub">Ngarrkuwuy &amp; Marrin Sq. outside</div></div>
+    </div>
+
+    <!-- Collapsible governance -->
+    <div class="gov-toggle-row">
+        <button class="gov-toggle" id="govToggle">
+            <span><span id="govChevron">▸</span>&nbsp;&nbsp;Governance &amp; draft-rate detail</span>
+            <span class="gov-toggle-right"><span id="govTogglePending">—</span> pending · <span id="govToggleRejCan">—</span> rejected/cancelled · click to expand</span>
+        </button>
+        <div class="gov-strip hidden" id="govStrip">
+            <div>
+                <div class="gov-title">Draft / rejected / cancelled — split by AM-era vs legacy?</div>
+                <div class="gov-body">
+                    <span id="govDraftTotal">—</span> drafts and <span id="govRejCanTotal">—</span> rejected/cancelled POs represent effort that didn't result in approval. Question for Matt/Rhian: <em>were these raised after ApprovalMax went live, or are they legacy records backfilled during AM setup?</em> Post-AM rejections are governance signals worth action; pre-AM rejections are noise. Needs an "AM commissioning date" per entity to split correctly.
+                </div>
+            </div>
+            <div class="gov-metrics">
+                <div class="gov-metric"><div class="gov-metric-name">Aborig. Corp</div><div class="gov-metric-val" id="govAborigVal">—</div><div class="gov-metric-pct" id="govAborigPct">—</div></div>
+                <div class="gov-metric"><div class="gov-metric-name">Enterprises</div><div class="gov-metric-val" id="govEntVal">—</div><div class="gov-metric-pct" id="govEntPct">—</div></div>
+                <div class="gov-metric"><div class="gov-metric-name">Property Mgmt</div><div class="gov-metric-val" id="govRpmmsVal">—</div><div class="gov-metric-pct" id="govRpmmsPct">—</div></div>
+                <div class="gov-metric"><div class="gov-metric-name">Mining</div><div class="gov-metric-val" id="govMiningVal">—</div><div class="gov-metric-pct" id="govMiningPct">—</div></div>
+                <div class="gov-metric"><div class="gov-metric-name">Investments</div><div class="gov-metric-val" id="govInvestVal">—</div><div class="gov-metric-pct" id="govInvestPct">—</div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ALL ENTITIES -->
+    <div class="entity-panel active" id="panel-all">
+        <div class="section-head"><h2>Cross-entity overview</h2><div class="section-kicker">Post-AM era · 1 Jun 2025 onwards</div></div>
+        <div class="overview-entities" id="overviewEntitiesGrid">
+            <div class="overview-entity-card dominant" onclick="setEntity('aborig')"><div class="oe-name">Aboriginal Corporation</div><div class="oe-val" id="oeAborigVal">—</div><div class="oe-sub" id="oeAborigSub">—</div><div class="oe-story">Welfare, funerals, culture &amp; ceremony. Story: wide benefit distribution to clan members.</div></div>
+            <div class="overview-entity-card dominant" onclick="setEntity('enterprises')"><div class="oe-name">Enterprises</div><div class="oe-val" id="oeEntVal">—</div><div class="oe-sub" id="oeEntSub">—</div><div class="oe-story">Pond 5 rehab, hydromulch, contractor-led. Story: high-value project portfolio.</div></div>
+            <div class="overview-entity-card" onclick="setEntity('rpmms')"><div class="oe-name">Property Management &amp; Maintenance</div><div class="oe-val" id="oeRpmmsVal">—</div><div class="oe-sub" id="oeRpmmsSub">—</div><div class="oe-story">Materials, tools, vehicles. Story: 1,350 maintenance jobs at AR pace.</div></div>
+            <div class="overview-entity-card dominant" onclick="setEntity('mining')"><div class="oe-name">Mining</div><div class="oe-val" id="oeMiningVal">—</div><div class="oe-sub" id="oeMiningSub">—</div><div class="oe-story">Fuel and plant repairs. Story: intercompany fuel supply dominates.</div></div>
+            <div class="overview-entity-card" onclick="setEntity('invest')"><div class="oe-name">Investments / Miliditjpi Trust</div><div class="oe-val" id="oeInvestVal">—</div><div class="oe-sub" id="oeInvestSub">—</div><div class="oe-story">Yanawal Units, Wallaby Beach. Story: episodic capital works.</div></div>
+        </div>
+        <div class="content-grid">
+            <div class="card">
+                <div class="card-head"><div class="card-title">Top suppliers across the corporation</div><div class="card-meta">by value · top 10</div></div>
+                <table class="data-table">
+                    <thead><tr><th>Supplier</th><th>Entity</th><th class="num">POs</th><th class="num">Value</th></tr></thead>
+                    <tbody id="topSuppliersBody"><tr class="placeholder-row"><td colspan="4">Loading…</td></tr></tbody>
+                </table>
+            </div>
+            <div class="card">
+                <div class="card-head"><div class="card-title">Spend concentration</div><div class="card-meta">dominant-supplier share</div></div>
+                <div id="concentrationRows"><div class="placeholder-row" style="color: var(--ink-faint); font-style: italic; padding: 20px 0;">Loading…</div></div>
+                <div class="todo" style="margin-top: 20px;"><strong>NOTE</strong> Concentration is a risk/efficiency signal. A single-supplier share above 30% usually reflects a major project commitment (like Enterprises' Pond 5 work) rather than operational diversity.</div>
+            </div>
+        </div>
+        <div class="callout" id="intercompanyCallout" style="display: none;">
+            <div>
+                <div class="callout-title">Intercompany flow detected</div>
+                <div class="callout-body" id="intercompanyBody">—</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ABORIGINAL CORPORATION -->
+    <div class="entity-panel" id="panel-aborig">
+        <div class="panel-hero">
+            <div>
+                <div class="panel-kicker">Rirratjingu Aboriginal Corporation · member welfare</div>
+                <div class="panel-title">What we provided for our members this year</div>
+                <div class="panel-standfirst">
+                    Year-to-date, the Corporation has committed <span class="dyn" id="aborigStandWelfareValue">—</span> across <span class="dyn" id="aborigStandWelfarePos">—</span> welfare purchase orders benefitting <span class="dyn" id="aborigStandRecipients">—</span> unique clan recipients. This view tracks the Annual Report narrative — family charitable, transport assistance, funerals, culture &amp; ceremony — in real time against FY25 baselines.
+                </div>
+            </div>
+            <div class="panel-quickstats">
+                <div class="quickstat-row"><span class="quickstat-label">Welfare YTD</span><span class="quickstat-val" id="aborigWelfareYtd">—</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Clan recipients</span><span class="quickstat-val" id="aborigRecipients">—</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Welfare POs</span><span class="quickstat-val" id="aborigWelfarePos">—</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">FY25 baseline · total</span><span class="quickstat-val mono">$2.25M</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">vs FY25 at <span id="aborigFyPace">—</span> pace</span><span class="quickstat-val" id="aborigVsFy25" style="color: var(--ochre);">—</span></div>
+            </div>
+        </div>
+
+        <div class="section-head"><h2>Welfare categories — YTD vs FY25 baseline</h2><div class="section-kicker">Source: Annual Report p.14–15</div></div>
+        <div class="welfare-grid" id="welfareGrid">
+            <div class="welfare-card"><div class="placeholder-row" style="color: var(--ink-faint); font-style: italic; grid-column: 1 / -1; padding: 20px;">Loading welfare categories…</div></div>
+        </div>
+
+        <div class="todo" style="margin-top: 20px;" id="funeralFlag">
+            <strong>FLAG</strong> <span id="funeralFlagBody">Funeral category is currently undercounted by the classifier — account 63205 "Funeral Expenses" holds significantly more spend than what's classified here. Next classifier iteration will route account 63205 → Family Funeral Support.</span>
+        </div>
+
+        <div class="content-grid">
+            <div class="card">
+                <div class="card-head">
+                    <div class="card-title">Clan family distribution · Family Charitable</div>
+                    <div class="card-meta"><span id="aborigUniqueRecipients">—</span> unique recipients YTD</div>
+                </div>
+                <table class="data-table">
+                    <thead><tr><th>Clan family</th><th class="num">Recipients</th><th class="num">POs</th><th class="num">YTD total</th></tr></thead>
+                    <tbody id="clanFamilyBody"><tr class="placeholder-row"><td colspan="4">Loading…</td></tr></tbody>
+                </table>
+                <div class="todo" style="margin-top: 14px;">
+                    <strong>ANONYMISED</strong> Dashboard surfaces spend aggregated to clan-family level, not individual recipients. Individual-level detail is retained in the underlying API for authorised finance users only.
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-head"><div class="card-title">Top welfare suppliers</div><div class="card-meta">by value</div></div>
+                <table class="data-table">
+                    <thead><tr><th>Supplier</th><th class="num">YTD</th></tr></thead>
+                    <tbody id="welfareSuppliersBody"><tr class="placeholder-row"><td colspan="2">Loading…</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ENTERPRISES -->
+    <div class="entity-panel" id="panel-enterprises">
+        <div class="panel-hero">
+            <div>
+                <div class="panel-kicker">Rirratjingu Enterprises · project portfolio</div>
+                <div class="panel-title">Where the major project dollars are going</div>
+                <div class="panel-standfirst">Enterprises is the largest single-entity spend across the corporation — <span class="dyn" id="entStandValue">—</span> committed year-to-date, concentrated in the Pond 5 rehabilitation and hydromulch program. A handful of POs account for more than half of Enterprises' total spend; this is a contract-led, high-value, low-volume portfolio.</div>
+            </div>
+            <div class="panel-quickstats">
+                <div class="quickstat-row"><span class="quickstat-label">Committed YTD</span><span class="quickstat-val" id="entYtd">—</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Total POs</span><span class="quickstat-val" id="entPos">—</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Drafts pending</span><span class="quickstat-val" id="entDrafts" style="color: var(--terra);">—</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Suppliers</span><span class="quickstat-val" id="entSuppliers">—</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Top supplier share</span><span class="quickstat-val" id="entTopShare">—</span></div>
+            </div>
+        </div>
+        <div class="content-grid">
+            <div class="card">
+                <div class="card-head"><div class="card-title">Top projects / contracts</div><div class="card-meta">by supplier · YTD value</div></div>
+                <table class="data-table">
+                    <thead><tr><th>Supplier</th><th class="num">POs</th><th class="num">Avg / PO</th><th class="num">Total</th></tr></thead>
+                    <tbody id="entSuppliersBody"><tr class="placeholder-row"><td colspan="4">Loading…</td></tr></tbody>
+                </table>
+                <div class="todo" style="margin-top: 16px;"><strong>FLAG</strong> Data-quality issue: <span id="entUnknownFlag">—</span>. "Unknown" supplier names in AM indicate records that need remediation upstream in Xero.</div>
+            </div>
+            <div class="card">
+                <div class="card-head"><div class="card-title">Spend by programme</div><div class="card-meta">by account code</div></div>
+                <table class="data-table">
+                    <thead><tr><th>Account</th><th class="num">POs</th><th class="num">Value</th></tr></thead>
+                    <tbody id="entAccountsBody"><tr class="placeholder-row"><td colspan="3">Loading…</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- PROPERTY MGMT -->
+    <div class="entity-panel" id="panel-rpmms">
+        <div class="panel-hero">
+            <div>
+                <div class="panel-kicker">Rirratjingu Property Management &amp; Maintenance · operations</div>
+                <div class="panel-title">Maintenance jobs, materials and the fleet</div>
+                <div class="panel-standfirst">RPMMS ran 1,350 maintenance tasks across the community in FY25 per the Annual Report. The ApprovalMax footprint is narrower — <span class="dyn" id="rpmmsStandPos">—</span> POs covering materials, tools, motor vehicles and staff training. Supplier base is diverse and dominated by materials vendors.</div>
+            </div>
+            <div class="panel-quickstats">
+                <div class="quickstat-row"><span class="quickstat-label">Committed YTD</span><span class="quickstat-val" id="rpmmsYtd">—</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Total POs</span><span class="quickstat-val" id="rpmmsPos">—</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Drafts pending</span><span class="quickstat-val" id="rpmmsDrafts" style="color: var(--ochre);">—</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Suppliers</span><span class="quickstat-val" id="rpmmsSuppliers">—</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Account codes used</span><span class="quickstat-val" id="rpmmsAccounts">—</span></div>
+            </div>
+        </div>
+        <div class="content-grid">
+            <div class="card">
+                <div class="card-head"><div class="card-title">Materials &amp; tools — where the jobs go</div><div class="card-meta">by account code</div></div>
+                <table class="data-table">
+                    <thead><tr><th>Account</th><th class="num">POs</th><th class="num">Value</th></tr></thead>
+                    <tbody id="rpmmsAccountsBody"><tr class="placeholder-row"><td colspan="3">Loading…</td></tr></tbody>
+                </table>
+            </div>
+            <div class="card">
+                <div class="card-head"><div class="card-title">Key trade suppliers</div><div class="card-meta">by value</div></div>
+                <table class="data-table">
+                    <thead><tr><th>Supplier</th><th class="num">POs</th><th class="num">Total</th></tr></thead>
+                    <tbody id="rpmmsSuppliersBody"><tr class="placeholder-row"><td colspan="3">Loading…</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="todo"><strong>FUTURE</strong> When MEX asset-management data is joined in, this view can show cost-per-asset, maintenance-cycle-adherence, and link the 1,350-tasks narrative directly to AM PO approval.</div>
+    </div>
+
+    <!-- MINING -->
+    <div class="entity-panel" id="panel-mining">
+        <div class="panel-hero">
+            <div>
+                <div class="panel-kicker">Rirratjingu Mining · operations</div>
+                <div class="panel-title">Fuel, plant repairs and the quarry</div>
+                <div class="panel-standfirst">Mining's procurement is dominated by fuel and plant repairs. A small number of large fuel POs sit alongside a very long tail of small plant-repair POs (<span class="dyn" id="miningStandRepairs">—</span> repair POs for modest total value). Intercompany fuel supply is a meaningful share of the total.</div>
+            </div>
+            <div class="panel-quickstats">
+                <div class="quickstat-row"><span class="quickstat-label">Committed YTD</span><span class="quickstat-val" id="miningYtd">—</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Total POs</span><span class="quickstat-val" id="miningPos">—</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Drafts pending</span><span class="quickstat-val" id="miningDrafts" style="color: var(--ochre);">—</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Fuel share</span><span class="quickstat-val" id="miningFuelShare">—</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Suppliers</span><span class="quickstat-val" id="miningSuppliers">—</span></div>
+            </div>
+        </div>
+        <div class="content-grid">
+            <div class="card">
+                <div class="card-head"><div class="card-title">Where the fuel and plant dollars go</div><div class="card-meta">by account code</div></div>
+                <table class="data-table">
+                    <thead><tr><th>Account</th><th class="num">POs</th><th class="num">Value</th></tr></thead>
+                    <tbody id="miningAccountsBody"><tr class="placeholder-row"><td colspan="3">Loading…</td></tr></tbody>
+                </table>
+            </div>
+            <div class="card">
+                <div class="card-head"><div class="card-title">Top mining suppliers</div><div class="card-meta">by value</div></div>
+                <table class="data-table">
+                    <thead><tr><th>Supplier</th><th class="num">POs</th><th class="num">Total</th></tr></thead>
+                    <tbody id="miningSuppliersBody"><tr class="placeholder-row"><td colspan="3">Loading…</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="todo"><strong>FUTURE</strong> When FleetComplete vehicle/fuel-burn data is joined, this view can reconcile fuel POs against actual truck litres — a real procurement-vs-consumption signal for the mining ops team.</div>
+    </div>
+
+    <!-- INVESTMENTS -->
+    <div class="entity-panel" id="panel-invest">
+        <div class="panel-hero">
+            <div>
+                <div class="panel-kicker">Rirratjingu Investments / Miliditjpi Trust · capital works</div>
+                <div class="panel-title">Property portfolio &amp; episodic capital projects</div>
+                <div class="panel-standfirst">The smallest entity by PO count (<span class="dyn" id="investStandPos">—</span>) but meaningful by value (<span class="dyn" id="investStandValue">—</span>). Single-shot big-ticket projects dominate — construction contracts and accommodation improvements. Highest draft rate across the group; review appropriate.</div>
+            </div>
+            <div class="panel-quickstats">
+                <div class="quickstat-row"><span class="quickstat-label">Committed YTD</span><span class="quickstat-val" id="investYtd">—</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Total POs</span><span class="quickstat-val" id="investPos">—</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Drafts pending</span><span class="quickstat-val" id="investDrafts" style="color: var(--terra);">—</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Suppliers</span><span class="quickstat-val" id="investSuppliers">—</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Biggest PO</span><span class="quickstat-val" id="investBiggestPo">—</span></div>
+            </div>
+        </div>
+        <div class="content-grid">
+            <div class="card">
+                <div class="card-head"><div class="card-title">Top capital-works accounts</div><div class="card-meta">property portfolio</div></div>
+                <table class="data-table">
+                    <thead><tr><th>Account</th><th class="num">POs</th><th class="num">Value</th></tr></thead>
+                    <tbody id="investAccountsBody"><tr class="placeholder-row"><td colspan="3">Loading…</td></tr></tbody>
+                </table>
+            </div>
+            <div class="card">
+                <div class="card-head"><div class="card-title">Top suppliers · capital works</div><div class="card-meta">by value</div></div>
+                <table class="data-table">
+                    <thead><tr><th>Supplier</th><th class="num">POs</th><th class="num">Total</th></tr></thead>
+                    <tbody id="investSuppliersBody"><tr class="placeholder-row"><td colspan="3">Loading…</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- Auth prompt (hidden unless needed) -->
+<div class="auth-prompt" id="authPrompt" style="display: none;">
+    <h2>Not connected to ApprovalMax</h2>
+    <p>This dashboard pulls live data from the ApprovalMax API. You need to authenticate the integration before data can be loaded.</p>
+    <a href="/">Go to authentication</a>
+</div>
+
+<div class="footer">
+    <div>RAC ApprovalMax · Cross-entity dashboard</div>
+    <div>Data refresh: <span id="footerRefresh">loading</span></div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+//   Constants & state
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Map AM companyId → our local entity key (used to target dashboard panels).
+const COMPANY_ID_TO_KEY = {
+    'c32a3d25-1a02-4f87-82d6-8584746119c1': 'aborig',
+    '77b4e48b-4dee-42fb-afdb-dae38c69df3d': 'enterprises',
+    'ef3d29f3-56da-4b76-8a57-cf1d10919391': 'rpmms',
+    '6655cc87-de32-40d1-aee9-5f78abac57fe': 'mining',
+    '075c13e2-4476-4541-b8e2-85215a5656dc': 'invest'
+};
+
+// Short display labels for compact contexts (top-supplier table, etc).
+const ENTITY_SHORT_LABEL = {
+    aborig: 'Aborig. Corp',
+    enterprises: 'Enterprises',
+    rpmms: 'Property Mgmt',
+    mining: 'Mining',
+    invest: 'Investments'
+};
+
+const TRIAL_EXPIRY = '2026-05-05';          // AM Premium trial end date
+const FY_START = '2025-07-01';               // FY26 start
+const AM_CUTOFF = '2025-06-01';              // AM adoption cutoff
+
+// Annual Report baselines (from welfare-categoriser.js for FY25).
+const AR_BASELINES = {
+    'Family Charitable Payments': 1403221,
+    'Transport Assistance':       360000,
+    'Family Funeral Support':     205984,
+    'Culture & Ceremony Support': 90565,
+    'Social & Cultural Programs': 76808,
+    'Education & Health':         38237,
+    'Medical & Terminally Ill':   37505,
+    'Whitegoods':                 25440,
+    'Future Leaders Program':     9453
+};
+
+const state = {
+    welfare: null,
+    scan: null,
+    welfareError: null,
+    scanError: null
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+//   Format helpers
+// ═══════════════════════════════════════════════════════════════════════════
+
+function moneyK(n) {
+    if (n == null) return '—';
+    const abs = Math.abs(n);
+    if (abs >= 1000000) return '$' + (n / 1000000).toFixed(2) + 'M';
+    if (abs >= 1000) return '$' + Math.round(n / 1000) + 'K';
+    return '$' + Math.round(n);
+}
+
+function moneyFull(n) {
+    if (n == null) return '—';
+    return '$' + Math.round(n).toLocaleString();
+}
+
+function num(n) {
+    if (n == null) return '—';
+    return n.toLocaleString();
+}
+
+function pct(r) {
+    if (r == null || isNaN(r)) return '—';
+    return Math.round(r * 100) + '%';
+}
+
+function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[c]);
+}
+
+function daysBetween(fromIso, toIso) {
+    const from = new Date(fromIso);
+    const to = new Date(toIso);
+    return Math.floor((to - from) / (1000 * 60 * 60 * 24));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//   Entity + panel switching (no data dependency)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function setEntity(key) {
+    document.querySelectorAll('.entity-tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.entity === key);
+    });
+    document.querySelectorAll('.entity-panel').forEach(p => {
+        p.classList.toggle('active', p.id === 'panel-' + key);
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+document.querySelectorAll('.entity-tab').forEach(tab => {
+    tab.addEventListener('click', () => setEntity(tab.dataset.entity));
+});
+
+document.getElementById('govToggle').addEventListener('click', () => {
+    const isHidden = document.getElementById('govStrip').classList.toggle('hidden');
+    document.getElementById('govChevron').textContent = isHidden ? '▸' : '▾';
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+//   Header / masthead — static context (dates)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function renderMasthead() {
+    const today = new Date();
+    const todayIso = today.toISOString().slice(0, 10);
+    const asAt = today.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' });
+    const fyDay = daysBetween(FY_START, todayIso);
+    const fyPct = Math.round((fyDay / 365) * 100) + '%';
+    const trialDaysLeft = daysBetween(todayIso, TRIAL_EXPIRY);
+    const trialText = trialDaysLeft > 0
+        ? trialDaysLeft + ' days remaining'
+        : (trialDaysLeft === 0 ? 'ends today' : 'expired');
+
+    document.getElementById('asAtDate').textContent = asAt.toUpperCase();
+    document.getElementById('fyDay').textContent = fyDay;
+    document.getElementById('fyPct').textContent = fyPct;
+    document.getElementById('trialDays').textContent = trialText;
+    document.getElementById('footerRefresh').textContent = asAt + ' ' + today.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//   Status + preview banner
+// ═══════════════════════════════════════════════════════════════════════════
+
+function setStatus(kind, text, bannerText) {
+    const pill = document.getElementById('statusPill');
+    pill.className = 'status-pill ' + kind;
+    pill.textContent = text;
+    const banner = document.getElementById('previewBanner');
+    banner.className = 'preview-banner ' + (kind === 'live' ? 'live' : kind === 'error' ? 'error' : '');
+    banner.innerHTML = bannerText;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//   Render — scan data (global KPIs, governance, overview, all 4 non-aborig panels)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function entityBy(key) {
+    if (!state.scan) return null;
+    const companyId = Object.keys(COMPANY_ID_TO_KEY).find(id => COMPANY_ID_TO_KEY[id] === key);
+    return state.scan.entitySummaries.find(e => e.companyId === companyId) || null;
+}
+
+function renderGlobalKPIs() {
+    if (!state.scan) return;
+    const entities = state.scan.entitySummaries;
+    const totals = entities.reduce((acc, e) => {
+        acc.posTotal += (e.posTotal || 0);
+        acc.totalValue += (e.totalValue || 0);
+        const sc = e.statusCounts || {};
+        acc.approved += (sc.approved || 0);
+        acc.draft += (sc.draft || 0);
+        acc.onApproval += (sc['on-approval'] || 0);
+        acc.rejected += (sc.rejected || 0);
+        acc.cancelled += (sc.cancelled || 0);
+        return acc;
+    }, { posTotal: 0, totalValue: 0, approved: 0, draft: 0, onApproval: 0, rejected: 0, cancelled: 0 });
+
+    const pending = totals.draft + totals.onApproval;
+    const rejCan = totals.rejected + totals.cancelled;
+
+    document.getElementById('kpiCommitted').textContent = moneyK(totals.totalValue);
+    document.getElementById('kpiEntityCount').textContent = entities.length;
+    document.getElementById('kpiTotalPos').textContent = num(totals.posTotal);
+    document.getElementById('kpiApproved').textContent = num(totals.approved);
+    document.getElementById('kpiApprovedPct').textContent = pct(totals.approved / totals.posTotal);
+    document.getElementById('kpiPending').textContent = num(pending);
+    document.getElementById('kpiPendingPct').textContent = pct(pending / totals.posTotal) + ' of total';
+    document.getElementById('kpiRejCan').textContent = num(rejCan);
+    document.getElementById('govTogglePending').textContent = num(pending);
+    document.getElementById('govToggleRejCan').textContent = num(rejCan);
+    document.getElementById('govDraftTotal').textContent = num(totals.draft);
+    document.getElementById('govRejCanTotal').textContent = num(rejCan);
+
+    // Entity tabs meta
+    const renderTabMeta = (key, elId) => {
+        const e = entityBy(key);
+        if (!e) return;
+        const posStr = (e.capped ? e.posTotal + '+' : e.posTotal);
+        document.getElementById(elId).textContent = posStr + ' POs · ' + moneyK(e.totalValue);
+    };
+    document.getElementById('tabMetaAll').textContent = entities.length + ' ORGS · ' + num(totals.posTotal) + ' POs';
+    renderTabMeta('aborig', 'tabMetaAborig');
+    renderTabMeta('enterprises', 'tabMetaEnterprises');
+    renderTabMeta('rpmms', 'tabMetaRpmms');
+    renderTabMeta('mining', 'tabMetaMining');
+    renderTabMeta('invest', 'tabMetaInvest');
+}
+
+function renderGovernance() {
+    if (!state.scan) return;
+    const entities = state.scan.entitySummaries;
+    const fill = (key, valId, pctId) => {
+        const e = entityBy(key);
+        if (!e) return;
+        const draft = (e.statusCounts || {}).draft || 0;
+        const total = e.posTotal || 1;
+        document.getElementById(valId).textContent = num(draft);
+        document.getElementById(pctId).textContent = pct(draft / total) + ' draft';
+    };
+    fill('aborig', 'govAborigVal', 'govAborigPct');
+    fill('enterprises', 'govEntVal', 'govEntPct');
+    fill('rpmms', 'govRpmmsVal', 'govRpmmsPct');
+    fill('mining', 'govMiningVal', 'govMiningPct');
+    fill('invest', 'govInvestVal', 'govInvestPct');
+}
+
+function renderOverviewPanel() {
+    if (!state.scan) return;
+    const fill = (key, valId, subId) => {
+        const e = entityBy(key);
+        if (!e) return;
+        const posStr = e.capped ? e.posTotal + '+' : num(e.posTotal);
+        document.getElementById(valId).textContent = moneyK(e.totalValue);
+        document.getElementById(subId).textContent = posStr + ' POs · ' + (e.uniqueSuppliers || '—') + ' suppliers';
+    };
+    fill('aborig', 'oeAborigVal', 'oeAborigSub');
+    fill('enterprises', 'oeEntVal', 'oeEntSub');
+    fill('rpmms', 'oeRpmmsVal', 'oeRpmmsSub');
+    fill('mining', 'oeMiningVal', 'oeMiningSub');
+    fill('invest', 'oeInvestVal', 'oeInvestSub');
+
+    // Top suppliers across the corporation (flatten + sort + top 10)
+    const all = [];
+    state.scan.entitySummaries.forEach(e => {
+        const key = COMPANY_ID_TO_KEY[e.companyId];
+        (e.topSuppliersByValue || []).forEach(s => {
+            all.push({
+                name: s.name,
+                total: s.total,
+                poCount: s.poCount,
+                entityLabel: ENTITY_SHORT_LABEL[key] || e.companyName
+            });
+        });
+    });
+    all.sort((a, b) => b.total - a.total);
+    const top = all.slice(0, 10);
+    document.getElementById('topSuppliersBody').innerHTML = top.map(s => {
+        return '<tr>' +
+            '<td class="supplier-name">' + escapeHtml(s.name) + '</td>' +
+            '<td class="mono-small">' + escapeHtml(s.entityLabel) + '</td>' +
+            '<td class="num">' + num(s.poCount) + '</td>' +
+            '<td class="num">' + moneyFull(s.total) + '</td>' +
+            '</tr>';
+    }).join('');
+
+    // Spend concentration (top supplier share per entity)
+    const concEntries = state.scan.entitySummaries.map(e => {
+        const key = COMPANY_ID_TO_KEY[e.companyId];
+        const topSup = (e.topSuppliersByValue || [])[0];
+        const share = (topSup && e.totalValue) ? (topSup.total / e.totalValue) : 0;
+        return {
+            entityName: ENTITY_SHORT_LABEL[key] || e.companyName,
+            topSupName: topSup ? topSup.name : '—',
+            share: share
+        };
+    }).sort((a, b) => b.share - a.share);
+    document.getElementById('concentrationRows').innerHTML = concEntries.map(c => {
+        const pctNum = Math.round(c.share * 100);
+        return '<div class="conc-row">' +
+            '<div class="conc-label">' + escapeHtml(c.entityName) + ' <span class="sub">' + escapeHtml(c.topSupName) + '</span></div>' +
+            '<div class="conc-val">' + pctNum + '% of spend</div>' +
+            '</div>' +
+            '<div class="conc-bar"><div class="conc-bar-fill" style="width: ' + pctNum + '%"></div></div>';
+    }).join('');
+
+    // Intercompany flow detection (suppliers named like Rirratjingu *)
+    const intercompany = [];
+    state.scan.entitySummaries.forEach(e => {
+        const key = COMPANY_ID_TO_KEY[e.companyId];
+        (e.topSuppliersByValue || []).forEach(s => {
+            if (/^Rirratjingu /i.test(s.name)) {
+                intercompany.push({
+                    from: s.name,
+                    to: ENTITY_SHORT_LABEL[key],
+                    total: s.total
+                });
+            }
+        });
+    });
+    if (intercompany.length > 0) {
+        const body = intercompany.map(i => i.from + ' → ' + i.to + ' (' + moneyK(i.total) + ')').join('; ');
+        document.getElementById('intercompanyBody').textContent = body + '. These wash out at group level but appear as real supplier spend inside AM.';
+        document.getElementById('intercompanyCallout').style.display = 'flex';
+    }
+}
+
+function renderEntityPanel(key, prefix) {
+    const e = entityBy(key);
+    if (!e) return;
+    const drafts = (e.statusCounts || {}).draft || 0;
+    const draftPctNum = Math.round((drafts / (e.posTotal || 1)) * 100);
+
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    set(prefix + 'Ytd', moneyK(e.totalValue));
+    set(prefix + 'Pos', (e.capped ? e.posTotal + '+' : num(e.posTotal)));
+    set(prefix + 'Drafts', num(drafts) + ' (' + draftPctNum + '%)');
+    set(prefix + 'Suppliers', num(e.uniqueSuppliers));
+
+    // Account codes count (RPMMS only uses this)
+    set(prefix + 'Accounts', num(e.uniqueAccountCodes));
+}
+
+function renderEnterprisesPanel() {
+    const e = entityBy('enterprises');
+    if (!e) return;
+    renderEntityPanel('enterprises', 'ent');
+
+    // Top supplier share
+    const topSup = (e.topSuppliersByValue || [])[0];
+    if (topSup && e.totalValue) {
+        document.getElementById('entTopShare').textContent = Math.round((topSup.total / e.totalValue) * 100) + '%';
+    }
+
+    // Standfirst dynamic
+    document.getElementById('entStandValue').textContent = moneyK(e.totalValue);
+
+    // Top suppliers table
+    const suppliers = (e.topSuppliersByValue || []).slice(0, 5);
+    document.getElementById('entSuppliersBody').innerHTML = suppliers.map(s => {
+        const avg = s.poCount > 0 ? moneyK(s.total / s.poCount) : '—';
+        const hint = s.name.toLowerCase().includes('gracie') ? ' <span class="account-desc">Pond 5 rehab · hydromulch</span>' :
+            s.name.toLowerCase().includes('unknown') ? ' <span class="account-desc">data-quality issue</span>' : '';
+        return '<tr><td class="supplier-name">' + escapeHtml(s.name) + hint + '</td>' +
+            '<td class="num">' + num(s.poCount) + '</td>' +
+            '<td class="num">' + avg + '</td>' +
+            '<td class="num">' + moneyFull(s.total) + '</td></tr>';
+    }).join('');
+
+    // "Unknown" supplier flag
+    const unknown = (e.topSuppliersByValue || []).find(s => s.name.toLowerCase().includes('unknown'));
+    if (unknown) {
+        document.getElementById('entUnknownFlag').textContent = num(unknown.poCount) + ' POs with supplier "Unknown" totalling ' + moneyK(unknown.total);
+    } else {
+        document.getElementById('entUnknownFlag').textContent = 'No "Unknown" supplier records flagged';
+    }
+
+    // Accounts table
+    const accounts = (e.topAccountsByValue || []).slice(0, 5);
+    document.getElementById('entAccountsBody').innerHTML = accounts.map(a => {
+        return '<tr><td class="supplier-name">' + escapeHtml(a.account || a.accountCode) + '</td>' +
+            '<td class="num">' + num(a.poCount) + '</td>' +
+            '<td class="num">' + moneyFull(a.total) + '</td></tr>';
+    }).join('');
+}
+
+function renderRpmmsPanel() {
+    const e = entityBy('rpmms');
+    if (!e) return;
+    renderEntityPanel('rpmms', 'rpmms');
+
+    document.getElementById('rpmmsStandPos').textContent = num(e.posTotal);
+
+    const suppliers = (e.topSuppliersByValue || []).slice(0, 5);
+    document.getElementById('rpmmsSuppliersBody').innerHTML = suppliers.map(s => {
+        return '<tr><td class="supplier-name">' + escapeHtml(s.name) + '</td>' +
+            '<td class="num">' + num(s.poCount) + '</td>' +
+            '<td class="num">' + moneyFull(s.total) + '</td></tr>';
+    }).join('');
+
+    const accounts = (e.topAccountsByValue || []).slice(0, 5);
+    document.getElementById('rpmmsAccountsBody').innerHTML = accounts.map(a => {
+        return '<tr><td class="supplier-name">' + escapeHtml(a.account || a.accountCode) + '</td>' +
+            '<td class="num">' + num(a.poCount) + '</td>' +
+            '<td class="num">' + moneyFull(a.total) + '</td></tr>';
+    }).join('');
+}
+
+function renderMiningPanel() {
+    const e = entityBy('mining');
+    if (!e) return;
+    renderEntityPanel('mining', 'mining');
+
+    // Fuel share (account starting with 510 = fuel)
+    const fuelAccount = (e.topAccountsByValue || []).find(a => (a.account || '').toLowerCase().includes('fuel'));
+    if (fuelAccount && e.totalValue) {
+        document.getElementById('miningFuelShare').textContent = Math.round((fuelAccount.total / e.totalValue) * 100) + '%';
+    } else {
+        document.getElementById('miningFuelShare').textContent = '—';
+    }
+
+    // Standfirst: repair PO count
+    const repairsAccount = (e.topAccountsByValue || []).find(a => /repair/i.test(a.account || ''));
+    document.getElementById('miningStandRepairs').textContent = repairsAccount ? num(repairsAccount.poCount) : '—';
+
+    const suppliers = (e.topSuppliersByValue || []).slice(0, 5);
+    document.getElementById('miningSuppliersBody').innerHTML = suppliers.map(s => {
+        const hint = /^rirratjingu/i.test(s.name) ? ' <span class="account-desc">intercompany</span>' :
+            /unknown/i.test(s.name) ? ' <span class="account-desc">data-quality issue</span>' : '';
+        return '<tr><td class="supplier-name">' + escapeHtml(s.name) + hint + '</td>' +
+            '<td class="num">' + num(s.poCount) + '</td>' +
+            '<td class="num">' + moneyFull(s.total) + '</td></tr>';
+    }).join('');
+
+    const accounts = (e.topAccountsByValue || []).slice(0, 5);
+    document.getElementById('miningAccountsBody').innerHTML = accounts.map(a => {
+        return '<tr><td class="supplier-name">' + escapeHtml(a.account || a.accountCode) + '</td>' +
+            '<td class="num">' + num(a.poCount) + '</td>' +
+            '<td class="num">' + moneyFull(a.total) + '</td></tr>';
+    }).join('');
+}
+
+function renderInvestPanel() {
+    const e = entityBy('invest');
+    if (!e) return;
+    renderEntityPanel('invest', 'invest');
+
+    document.getElementById('investStandPos').textContent = num(e.posTotal);
+    document.getElementById('investStandValue').textContent = moneyK(e.totalValue);
+
+    // Biggest PO = biggest single-PO supplier total (heuristic)
+    const biggest = (e.topSuppliersByValue || []).reduce((best, s) => {
+        const avg = s.poCount > 0 ? s.total / s.poCount : 0;
+        return avg > best ? avg : best;
+    }, 0);
+    document.getElementById('investBiggestPo').textContent = moneyK(biggest);
+
+    const suppliers = (e.topSuppliersByValue || []).slice(0, 5);
+    document.getElementById('investSuppliersBody').innerHTML = suppliers.map(s => {
+        const hint = /^rirratjingu/i.test(s.name) ? ' <span class="account-desc">intercompany</span>' : '';
+        return '<tr><td class="supplier-name">' + escapeHtml(s.name) + hint + '</td>' +
+            '<td class="num">' + num(s.poCount) + '</td>' +
+            '<td class="num">' + moneyFull(s.total) + '</td></tr>';
+    }).join('');
+
+    const accounts = (e.topAccountsByValue || []).slice(0, 5);
+    document.getElementById('investAccountsBody').innerHTML = accounts.map(a => {
+        return '<tr><td class="supplier-name">' + escapeHtml(a.account || a.accountCode) + '</td>' +
+            '<td class="num">' + num(a.poCount) + '</td>' +
+            '<td class="num">' + moneyFull(a.total) + '</td></tr>';
+    }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//   Render — welfare data (Aboriginal Corp panel)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function renderAborigPanel() {
+    if (!state.welfare) return;
+    const w = state.welfare;
+
+    // Quickstats + standfirst
+    document.getElementById('aborigStandWelfareValue').textContent = moneyK(w.totalWelfareValue);
+    document.getElementById('aborigStandWelfarePos').textContent = num(w.totalWelfarePOs);
+
+    const familyCharitable = w.categories.find(c => c.arLine === 'Family Charitable Payments');
+    const recipients = familyCharitable ? familyCharitable.uniqueRecipients : 0;
+    document.getElementById('aborigStandRecipients').textContent = num(recipients);
+    document.getElementById('aborigRecipients').textContent = num(recipients);
+    document.getElementById('aborigUniqueRecipients').textContent = num(recipients);
+
+    document.getElementById('aborigWelfareYtd').textContent = moneyK(w.totalWelfareValue);
+    document.getElementById('aborigWelfarePos').textContent = num(w.totalWelfarePOs);
+    document.getElementById('aborigFyPace').textContent = Math.round(w.fyPaceFraction * 100) + '%';
+
+    const baselineTotal = w.fy25ArBaselineTotal;
+    const projected = w.fyPaceFraction > 0 ? w.totalWelfareValue / w.fyPaceFraction : 0;
+    const delta = projected - baselineTotal;
+    const deltaPct = baselineTotal > 0 ? Math.round((delta / baselineTotal) * 100) : 0;
+    const vsEl = document.getElementById('aborigVsFy25');
+    vsEl.textContent = (deltaPct >= 0 ? '+' : '') + deltaPct + '%';
+    vsEl.style.color = deltaPct < -15 ? 'var(--ochre)' : deltaPct > 15 ? 'var(--terra)' : 'var(--moss)';
+
+    // Welfare categories grid — 6 cards covering the visible categories
+    const visibleCategoryNames = [
+        'Family Charitable Payments',
+        'Transport Assistance',
+        'Family Funeral Support',
+        'Culture & Ceremony Support',
+        'Social & Cultural Programs'
+    ];
+    const combinedSmallCats = ['Whitegoods', 'Medical & Terminally Ill', 'Education & Health', 'Future Leaders Program'];
+
+    const cardsHtml = [];
+    visibleCategoryNames.forEach(catName => {
+        const cat = w.categories.find(c => c.arLine === catName);
+        if (!cat) return;
+        const pctOfBaseline = cat.fy25Baseline > 0 ? Math.min(100, Math.round((cat.ytdTotal / cat.fy25Baseline) * 100)) : 0;
+        const barClass = pctOfBaseline < w.fyPaceFraction * 100 - 15 ? 'under' : pctOfBaseline > w.fyPaceFraction * 100 + 15 ? 'over' : 'on';
+        const isUndercount = catName === 'Family Funeral Support' && cat.ytdTotal < 50000;  // heuristic
+        const ytdColor = isUndercount ? 'var(--terra)' : 'var(--ink)';
+        cardsHtml.push(
+            '<div class="welfare-card">' +
+                '<div>' +
+                    '<div class="welfare-card-name">' + escapeHtml(catName) + '</div>' +
+                    '<div class="welfare-card-ytd" style="color: ' + ytdColor + ';">' + moneyK(cat.ytdTotal) + '</div>' +
+                    '<div class="welfare-card-baseline">FY25 baseline · ' + moneyK(cat.fy25Baseline) + '</div>' +
+                '</div>' +
+                '<div>' +
+                    '<div class="welfare-bar ' + barClass + '"><div class="welfare-bar-fill" style="width: ' + pctOfBaseline + '%"></div></div>' +
+                    '<div class="welfare-card-meta">' +
+                        '<span>' + num(cat.ytdPOs) + ' POs' + (isUndercount ? ' · <em style="color: var(--terra);">undercounted</em>' : '') + '</span>' +
+                        '<span>' + pctOfBaseline + '% of FY25</span>' +
+                    '</div>' +
+                '</div>' +
+            '</div>'
+        );
+    });
+
+    // Combined small categories (Whitegoods/Medical/Education/Future Leaders)
+    let smallTotal = 0;
+    let smallPos = 0;
+    let smallBaseline = 0;
+    combinedSmallCats.forEach(n => {
+        const cat = w.categories.find(c => c.arLine === n);
+        if (cat) {
+            smallTotal += cat.ytdTotal;
+            smallPos += cat.ytdPOs;
+            smallBaseline += (cat.fy25Baseline || 0);
+        }
+    });
+    const smallPctBase = smallBaseline > 0 ? Math.round((smallTotal / smallBaseline) * 100) : 0;
+    cardsHtml.push(
+        '<div class="welfare-card">' +
+            '<div>' +
+                '<div class="welfare-card-name">Whitegoods · Medical · Education</div>' +
+                '<div class="welfare-card-ytd">' + moneyK(smallTotal) + '</div>' +
+                '<div class="welfare-card-baseline">FY25 baseline combined · ' + moneyK(smallBaseline) + '</div>' +
+            '</div>' +
+            '<div>' +
+                '<div class="welfare-bar under"><div class="welfare-bar-fill" style="width: ' + smallPctBase + '%"></div></div>' +
+                '<div class="welfare-card-meta"><span>' + num(smallPos) + ' POs</span><span>long-tail</span></div>' +
+            '</div>' +
+        '</div>'
+    );
+
+    document.getElementById('welfareGrid').innerHTML = cardsHtml.join('');
+
+    // Clan family distribution — uses new topFamilies field from classifier
+    if (familyCharitable && familyCharitable.topFamilies) {
+        const families = familyCharitable.topFamilies
+            .filter(f => f.total > 0)
+            .sort((a, b) => b.total - a.total);
+        document.getElementById('clanFamilyBody').innerHTML = families.map(f => {
+            return '<tr class="family-row">' +
+                '<td>' + escapeHtml(f.family) + '</td>' +
+                '<td class="num">' + num(f.uniqueRecipients) + '</td>' +
+                '<td class="num">' + num(f.poCount) + '</td>' +
+                '<td class="num">' + moneyFull(f.total) + '</td>' +
+                '</tr>';
+        }).join('');
+    } else {
+        document.getElementById('clanFamilyBody').innerHTML =
+            '<tr class="placeholder-row"><td colspan="4">Family rollup not yet available from API — waiting for next classifier deploy.</td></tr>';
+    }
+
+    // Top welfare suppliers (from Family Charitable category)
+    if (familyCharitable && familyCharitable.topSuppliers) {
+        document.getElementById('welfareSuppliersBody').innerHTML = familyCharitable.topSuppliers.slice(0, 8).map(s => {
+            return '<tr><td class="supplier-name">' + escapeHtml(s.name) + '</td>' +
+                '<td class="num">' + moneyK(s.total) + '</td></tr>';
+        }).join('');
+    }
+
+    // Funeral flag body — check actual data
+    const funeralCat = w.categories.find(c => c.arLine === 'Family Funeral Support');
+    if (funeralCat && funeralCat.ytdTotal < 50000) {
+        document.getElementById('funeralFlagBody').textContent = 
+            'Family Funeral Support shows ' + moneyK(funeralCat.ytdTotal) + ' YTD but AR baseline is ' + moneyK(funeralCat.fy25Baseline) + '. ' +
+            'Funeral-context spend (flights for funerals, groceries for wakes) is landing in other categories because the classifier currently matches funeral-named suppliers only. Next classifier iteration will route account 63205 → Family Funeral Support.';
+    } else {
+        document.getElementById('funeralFlag').style.display = 'none';
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//   Data loading
+// ═══════════════════════════════════════════════════════════════════════════
+
+function updateStatusBanner() {
+    const hasWelfare = !!state.welfare;
+    const hasScan = !!state.scan;
+    const welfareErr = state.welfareError;
+    const scanErr = state.scanError;
+
+    if (welfareErr && scanErr) {
+        setStatus('error', 'Error',
+            'Both endpoints failed. Welfare: ' + escapeHtml(welfareErr) + ' · Entity scan: ' + escapeHtml(scanErr) +
+            '. Try <a href="/">re-authenticating</a> or refresh this page.');
+    } else if (hasWelfare && hasScan) {
+        const now = new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+        setStatus('live', 'Live',
+            'Live data · fetched at ' + now + ' · refresh page to reload');
+    } else if (hasWelfare || hasScan) {
+        const loaded = hasWelfare ? 'welfare' : 'entity scan';
+        const waiting = hasWelfare ? 'entity scan' : 'welfare';
+        setStatus('loading', 'Loading',
+            loaded + ' loaded · waiting on ' + waiting + '…');
+    }
+}
+
+async function checkAuth() {
+    try {
+        const res = await fetch('/auth/status');
+        const data = await res.json();
+        return !!data.authenticated;
+    } catch (e) {
+        return null;  // network failure
+    }
+}
+
+async function loadWelfare() {
+    try {
+        const res = await fetch('/api/welfare/aboriginal-corp?fyStart=' + FY_START);
+        if (res.status === 401) throw new Error('Not authenticated');
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Welfare endpoint failed');
+        state.welfare = data.summary;
+        renderAborigPanel();
+        updateStatusBanner();
+    } catch (err) {
+        state.welfareError = err.message;
+        updateStatusBanner();
+    }
+}
+
+async function loadEntityScan() {
+    try {
+        const res = await fetch('/api/am/entity-scan?createdAtOrAfter=' + AM_CUTOFF);
+        if (res.status === 401) throw new Error('Not authenticated');
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Entity scan failed');
+        state.scan = data;
+        renderGlobalKPIs();
+        renderGovernance();
+        renderOverviewPanel();
+        renderEnterprisesPanel();
+        renderRpmmsPanel();
+        renderMiningPanel();
+        renderInvestPanel();
+        updateStatusBanner();
+    } catch (err) {
+        state.scanError = err.message;
+        updateStatusBanner();
+    }
+}
+
+async function boot() {
+    renderMasthead();
+    setStatus('loading', 'Loading', 'Loading live data from ApprovalMax… allow ~60–180s on first load');
+
+    const authed = await checkAuth();
+    if (authed === false) {
+        document.getElementById('dashboardShell').style.display = 'none';
+        document.getElementById('authPrompt').style.display = 'block';
+        setStatus('error', 'Not auth',
+            'Not authenticated to ApprovalMax. Please <a href="/">connect the integration</a> first.');
+        return;
+    }
+
+    // Fire both in parallel. Each updates the banner + its sections on completion.
+    loadWelfare();
+    loadEntityScan();
+}
+
+boot();
+</script>
+
+</body>
+</html>
