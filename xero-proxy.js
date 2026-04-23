@@ -191,13 +191,25 @@ async function handleBudgetVsActual(req, res) {
                 const actual = plData.summary || {};
                 const r2 = n => Math.round((n || 0) * 100) / 100;
 
+                // totalCosts = revenue - netProfit. This folds in COGS for
+                // trading entities whose P&L splits Cost of Sales out of
+                // totalExpenses (Matt's endpoint returns OpEx only in
+                // totalExpenses; COGS is absorbed into grossProfit upstream).
+                // For non-trading entities the math collapses to the same
+                // number as totalExpenses, so this is a safe universal field
+                // to compare against fy26Budget.expenses on the dashboard.
+                const rev = actual.totalRevenue || 0;
+                const net = actual.netProfit   || 0;
+                const totalCosts = rev - net;
+
                 return {
                     entityKey: key,
                     organizationName: orgName,
                     fy26Budget: budget,
                     ytdActual: {
                         revenue: r2(actual.totalRevenue),
-                        expenses: r2(actual.totalExpenses),
+                        expenses: r2(actual.totalExpenses),   // OpEx only; kept for reference
+                        totalCosts: r2(totalCosts),           // OpEx + COGS; use for budget variance
                         grossProfit: r2(actual.grossProfit),
                         netProfit: r2(actual.netProfit),
                         periodDescription: plData.period?.description || null
