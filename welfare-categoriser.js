@@ -57,15 +57,13 @@ const NON_CLAN_STAFF_NAMES = new Set([
     // Corporate Services
     'Brodie Apthorpe', 'Rachael Schofield', 'Adrian Rota', 'Duane Kuru',
     'Jodie Douglas', 'Cassandra Richert', 'Jamie Schofield',
-    // Culture & Community — Day 3e: per Duane, these are staff acting as
-    // intermediaries for clan families, not clan members themselves.
-    'Rylee Ford', 'Elenie Bromot', 'Zoe Bromot',
-    'Peter Reeves', 'Tiani Mununggurritj',
+    // Culture & Community (Day 3e: all RAC staff per Duane's clarification)
+    'Rylee Ford', 'Elenie Bromot', 'Eleni Bromot',   // Eleni = variant typo (Day 3f)
+    'Zoe Bromot', 'Peter Reeves', 'Tiani Mununggurritj',
     // Mining / Enterprises / Fuel
     'Gavin Law', 'James Ball', 'Uheina Gillon', 'Matthew Henger',
     'Paul McLoughlin', 'Warwick Mylchreest', 'Jarrad Ernst',
-    // Employment & Training — Day 3e: same pattern. Exclude Djay Marika and
-    // Shakira Marika (both clan via Marika surname).
+    // Employment & Training (exclude Djay Marika, Shakira Marika — both clan)
     'Peter Britto',
     'Wilisoni Lotu', 'Wil Lotu', 'Wilson Lotu',   // variant spellings
     'Jaclyn Bromot', 'Paula Gumana',
@@ -74,26 +72,30 @@ const NON_CLAN_STAFF_NAMES = new Set([
     'Jack Aragu', 'Danielle Stolte'
 ]);
 
-// Yolŋu clan surnames. Any 2+ word capitalised name ending in one of these
-// is presumptively a real clan welfare recipient. Powers the Priority-3
-// fallback in extractRecipient() and the Step-8 welfare-signal detection.
-//
-// Day 3e revision: removed Bromot, Lotu, Mununggurritj, Gumana — these are
-// staff surnames per Duane, not clan-indicative. Kept Marika (Rirratjingu)
-// plus other Yolŋu clans that appear as legitimate welfare recipients in
-// the data (Directors, community members):
-//   Yunupingu, Garrawurra, Bukulatjpi, Dhamarrandji, Wanapuyngu,
-//   Rarrkminy, Ulamari
+// Yolŋu clan surnames — genuine clan markers only.
 const CLAN_SURNAMES = [
     'Marika', 'Yunupingu', 'Garrawurra', 'Bukulatjpi', 'Dhamarrandji',
     'Wanapuyngu', 'Rarrkminy', 'Ulamari'
 ];
 
+// Place words that should never start an extracted name. Used both as a
+// denylist check on extracted strings AND as a negative lookahead in the
+// clan-surname regex so the scan doesn't greedy-match "Yirrkala Gary Marika"
+// as a single unit and then discard it (Day 3f fix — see PO-12536 case).
+const PLACE_WORDS = [
+    'Gove', 'Nhulunbuy', 'Yirrkala', 'Elcho', 'Gapuwiyak', 'Darwin',
+    'Malpi', 'Arnhem'
+];
+const PLACE_FIRST_WORDS = new Set(PLACE_WORDS);
+
 // Compiled regex for scanning a description for "First [Middle] Last" where
-// Last is a known clan surname. Global flag so we can find all matches and
-// pick the best (non-denylisted) one.
+// Last is a known clan surname. Negative lookahead (Day 3f) prevents the
+// pattern from starting at a place word like "Yirrkala", so an address line
+// ending in "- Yirrkala" followed by "Gary Waninya Marika" on the next line
+// correctly extracts "Gary Waninya Marika" rather than greedy-matching the
+// whole string and discarding it.
 const CLAN_SURNAME_SCAN_REGEX = new RegExp(
-    String.raw`\b([A-Z][a-z]+(?:\s+(?:[A-Z]\.?|[A-Z][a-z]+))*\s+(?:${CLAN_SURNAMES.join('|')}))\b`,
+    String.raw`\b(?!(?:${PLACE_WORDS.join('|')})\b)([A-Z][a-z]+(?:\s+(?:[A-Z]\.?|[A-Z][a-z]+))*\s+(?:${CLAN_SURNAMES.join('|')}))\b`,
     'g'
 );
 
@@ -102,7 +104,7 @@ const CLAN_SURNAME_SCAN_REGEX = new RegExp(
 const ON_BEHALF_OF_REGEX = /\bon\s+behalf\s+of\s+([A-Z][a-z]+(?:\s+(?:[A-Z]\.?|[A-Z][a-z]+))*\s+[A-Z][a-z]+(?:\s+(?:&|and)\s+[Ff]amily)?)/;
 
 // -----------------------------------------------------------------------------
-// Rule sets (ordered by specificity — first match wins within each tier)
+// Rule sets
 // -----------------------------------------------------------------------------
 
 const SUPPLIER_ACCOUNT_COMBOS = [
@@ -169,7 +171,8 @@ const INTERNAL_CORPORATE_SUPPLIER_PATTERNS = [
     /\bbz technology\b/i,
     /\bofficeworks\b/i,
     /\bbig nt print\b/i,
-    /\bcarwash kingz\b/i
+    /\bcarwash kingz\b/i,
+    /\bbendesigns\b/i          // Day 3f: vinyl banner with RAC logo (corporate branding)
 ];
 
 const RECIPIENT_REGEX = /\b(?:[Tt]o|[Ff]or|[Pp]assenger|[Rr]equ(?:ired|ested)\s+[Bb]y)\b[:\s]+([A-Z][a-z]+(?:\s+(?:[A-Z]\.?|[A-Z][a-z]+))*\s+[A-Z][a-z]+(?:\s+(?:&|and)\s+[Ff]amily)?)/;
@@ -182,12 +185,8 @@ const NON_PERSON_NAMES = new Set([
     'Peninsula Bakery', 'Kamayan Cafe', 'Territory Funerals',
     'Simplicity Funerals', 'Harvey Norman', 'Sodexo Remote',
     'MAF International',
-    'Country Music Video'
-]);
-
-const PLACE_FIRST_WORDS = new Set([
-    'Gove', 'Nhulunbuy', 'Yirrkala', 'Elcho', 'Gapuwiyak', 'Darwin',
-    'Malpi', 'Arnhem'
+    'Country Music Video',
+    'Cruise Ship'     // Day 3f: appeared in Culture & Ceremony topRecipients
 ]);
 
 // -----------------------------------------------------------------------------
@@ -224,14 +223,6 @@ function scanForClanSurname(text) {
     return null;
 }
 
-/**
- * Extract a recipient name from a PO's combined line-item descriptions.
- * Priority-tiered:
- *   1. "on behalf of X" override
- *   2. Primary trigger-word regex (filtering non-clan staff intermediaries)
- *   3. Clan-surname scan
- * Returns null if no valid clan recipient found.
- */
 function extractRecipient(po) {
     const text = combinedDescription(po);
 
@@ -249,7 +240,6 @@ function extractRecipient(po) {
         if (!isDenylistedName(name)) {
             return normalizeRecipientName(name);
         }
-        // Primary matched a staff name — fall through to clan scan.
     }
 
     const clanMatch = scanForClanSurname(text);
@@ -263,12 +253,6 @@ function extractRecipient(po) {
 /**
  * Detect whether a PO description contains ANY recipient-like pattern,
  * even if the extracted name ultimately gets filtered out as staff.
- * Used in Step 8 to preserve welfare classification for POs where a
- * staff intermediary is named but no clan beneficiary is extractable.
- *
- * Day 3e: prevents regressions where filtering Rylee Ford / Elenie Bromot
- * etc. would push legitimate welfare POs into Uncategorised just because
- * we can't name the beneficiary.
  */
 function hasRecipientPattern(po) {
     const text = combinedDescription(po);
@@ -384,9 +368,9 @@ function classifyPO(po) {
         }
     }
 
-    // Step 8: Recipient-fallback (Day 3e: now uses hasRecipientPattern rather
-    // than just extractRecipient, so POs where a staff intermediary is named
-    // but the beneficiary isn't extractable still classify as welfare).
+    // Step 8: Recipient-fallback. Uses hasRecipientPattern so POs where a
+    // staff intermediary is named still classify as welfare even when the
+    // beneficiary isn't attributable.
     if (hasRecipientPattern(po)) {
         const attributedName = extractRecipient(po);
         return {
@@ -556,13 +540,13 @@ function buildWelfareSummary(pos, opts = {}) {
         methodology: {
             note: 'Heuristic classifier. Confidence levels per category indicate signal strength. Uncategorised bucket contains unmatched POs for tuning. See SAMPLING_FINDINGS.md §3-4 for rules.',
             rules: [
-                'Internal corporate exclusion: vehicle regos, office keywords, "pick up by RAC"; intercompany Rirratjingu suppliers; printing/signage/IT/stationery vendors',
+                'Internal corporate exclusion: vehicle regos, office keywords, "pick up by RAC"; intercompany Rirratjingu suppliers; printing/signage/IT/stationery/branding vendors',
                 'Supplier + account combo (high): BP + 63415 → Family Charitable; Gove Warehouse + 64480 → Whitegoods',
                 'Supplier name hint (high): Gove Transport/taxi, Air Frontier/Black Diamond/MAF/HM Air → Transport; funeral/memorial → Family Funeral; medical/chemist → Medical; Harvey Norman → Whitegoods; Buku Larrngay Mulka → Culture & Ceremony',
                 'Account code family (high): 250xx → Family Charitable (member voucher, supplier-agnostic)',
                 'Account code 64605 Travel → Transport; 63950 + recipient → Family Charitable; 63950 no recipient → Social & Cultural',
                 'Description keyword (medium): "ceremonial/ceremony/buŋgul" → Culture & Ceremony Support',
-                'Recipient extraction: "on behalf of X" > trigger-word regex (filtering RAC staff as intermediaries per Jan 2026 staff list) > clan-surname scan (Marika/Yunupingu/Garrawurra/Bukulatjpi/Dhamarrandji/Wanapuyngu/Rarrkminy/Ulamari)',
+                'Recipient extraction: "on behalf of X" > trigger-word regex (to/for/required by/requested by, filtering RAC staff as intermediaries per Jan 2026 staff list) > clan-surname scan (Marika/Yunupingu/Garrawurra/Bukulatjpi/Dhamarrandji/Wanapuyngu/Rarrkminy/Ulamari, with place-word negative lookahead)',
                 'Recipient-fallback (Step 8): if ANY recipient-pattern detected → Family Charitable (medium), even when staff-intermediary filter removes the attributed name',
                 'Everything else: Uncategorised — inspect sampleDescriptions to tune rules'
             ]
