@@ -5,6 +5,7 @@ const express = require('express');
 const fetch = require('node-fetch');
 const { Pool } = require('pg');
 const amClient = require('./approvalmax-client');
+const welfare = require('./welfare-categoriser');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -33,11 +34,24 @@ const DEFAULT_XERO_TYPES_FOR_AGGREGATION = ['purchase-orders', 'bills'];
 // "AM adoption at RAC" section. Records created before this are backfill.
 const DEFAULT_AM_ERA_CUTOFF = '2025-06-01';
 
+// FY26 start for Aboriginal Corp welfare view. Australian FY is Jul 1 - Jun 30.
+// Used as default in /api/welfare/aboriginal-corp endpoint.
+const DEFAULT_WELFARE_FY_START = '2025-07-01';
+
+// Aboriginal Corp's companyId, hardcoded because this is a dedicated endpoint.
+// If RAC ever re-onboards AM with a new org ID this will need updating.
+const ABORIGINAL_CORP_COMPANY_ID = 'c32a3d25-1a02-4f87-82d6-8584746119c1';
+
 // Maximum pages fetched per (entity, type) combo in summary endpoint.
 // AM caps limit at 100 per page, so MAX_PAGES_PER_COUNT=20 = 2,000 records.
 // AM rate limit is 100 reads/min per ClientId+CompanyId; 5 entities × 2 types × 20 pages
 // = 200 calls worst case but spread across different CompanyIds so well within limits.
 const MAX_PAGES_PER_COUNT = 20;
+
+// For the welfare endpoint we may need more pages than the summary cap because
+// Aboriginal Corp hits 2,000+ POs per year and we want the *items themselves*,
+// not just the count. Set higher and revisit if it becomes an issue.
+const MAX_PAGES_FOR_WELFARE = 35;  // 3,500 records max
 
 // Helper: pull the three new filter params from a request's query string in one go.
 // Returns { createdAtOrAfter, orderBy, orderDirection } with undefineds for absent values.
@@ -75,6 +89,33 @@ async function countAllPages(accessToken, companyId, xeroType, baseFilters) {
     } while (continuationToken);
 
     return { count, pages, capped };
+}
+
+// Helper: fully paginate and RETURN the items themselves (unlike countAllPages).
+// Used by the welfare endpoint where we need to inspect each PO's line items,
+// tracking, and events. Uses a higher page cap (MAX_PAGES_FOR_WELFARE).
+async function fetchAllPages(accessToken, companyId, xeroType, baseFilters) {
+    const allItems = [];
+    let pages = 0;
+    let continuationToken = undefined;
+    let capped = false;
+
+    do {
+        const result = await amClient.getXeroRequests(accessToken, companyId, xeroType, {
+            ...baseFilters,
+            limit: 100,
+            continuationToken
+        });
+        allItems.push(...result.items);
+        continuationToken = result.continuationToken;
+        pages++;
+        if (pages >= MAX_PAGES_FOR_WELFARE && continuationToken) {
+            capped = true;
+            break;
+        }
+    } while (continuationToken);
+
+    return { items: allItems, pages, capped };
 }
 
 // Postgres pool
@@ -240,6 +281,7 @@ app.get('/', (req, res) => {
         }
         .section h3 { margin-top: 0; color: #4a5568; }
         .section h4 { color: #4a5568; margin-top: 16px; margin-bottom: 8px; }
+        .section.welfare { border-left: 4px solid #8B5A96; background: #faf5ff; }
         .status {
             padding: 12px;
             border-radius: 6px;
@@ -311,6 +353,21 @@ app.get('/', (req, res) => {
         }
         .kpi-card .num { font-size: 24px; font-weight: 700; color: #8B5A96; }
         .kpi-card .label { font-size: 12px; color: #64748b; margin-top: 4px; }
+        .category-card {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 16px;
+            margin: 10px 0;
+        }
+        .category-card .cat-name { font-size: 16px; font-weight: 600; color: #2d3748; }
+        .category-card .cat-figures { display: flex; gap: 20px; margin: 8px 0; flex-wrap: wrap; }
+        .category-card .cat-fig-label { font-size: 11px; color: #64748b; text-transform: uppercase; }
+        .category-card .cat-fig-value { font-size: 18px; font-weight: 700; color: #8B5A96; }
+        .category-card .ar-caption { font-size: 12px; color: #64748b; font-style: italic; margin-top: 8px; }
+        .pace-on-track { color: #059669; }
+        .pace-over { color: #dc2626; }
+        .pace-under { color: #d97706; }
         .filter-summary {
             background: #eff6ff;
             border: 1px solid #bfdbfe;
@@ -356,8 +413,34 @@ app.get('/', (req, res) => {
             <div id="authResult"></div>
         </div>
 
+        <div class="section welfare">
+            <h3>Aboriginal Corp — "We Provided" view (prototype)</h3>
+            <p style="color: #64748b; font-size: 13px;">
+                BAU procurement visibility for welfare payments. Structured to tell the Annual Report story in real time.
+                Major project spend is managed outside AM and reported separately.
+            </p>
+
+            <div class="control-row">
+                <label for="welfareFyStart">FY start:</label>
+                <input type="date" id="welfareFyStart" value="${DEFAULT_WELFARE_FY_START}">
+                <small style="width: 100%; color: #64748b; margin-top: 4px;">
+                    Default <code>${DEFAULT_WELFARE_FY_START}</code> is FY26 start. Use <code>2024-07-01</code> for FY25 comparison.
+                </small>
+            </div>
+
+            <div class="button-grid">
+                <button onclick="fetchWelfareView()" disabled id="btn-welfare">Build "We Provided" view</button>
+            </div>
+
+            <div id="welfareFilterSummary"></div>
+            <div id="welfareCappedWarning"></div>
+            <div id="welfareKpiRow"></div>
+            <div id="welfareCategories"></div>
+            <div id="welfareResult"></div>
+        </div>
+
         <div class="section">
-            <h3>Step 2: Xero Request Data</h3>
+            <h3>Step 2: Xero Request Data (raw / sampling)</h3>
             <p>Hits the real AM endpoints: <code>/api/v1/companies/{id}/xero/{type}</code></p>
 
             <div class="control-row">
@@ -586,6 +669,120 @@ app.get('/', (req, res) => {
             document.getElementById('kpiRow').innerHTML = html;
         }
 
+        // ──── Welfare view ────
+        function fetchWelfareView() {
+            const fyStart = document.getElementById('welfareFyStart').value || '${DEFAULT_WELFARE_FY_START}';
+            document.getElementById('welfareFilterSummary').innerHTML =
+                '<div class="filter-summary">FY start: <strong>' + fyStart + '</strong>. Fetching all Aboriginal Corp POs (this may take 15-30 seconds due to pagination)...</div>';
+            document.getElementById('welfareKpiRow').innerHTML = '';
+            document.getElementById('welfareCategories').innerHTML = '';
+            document.getElementById('welfareCappedWarning').innerHTML = '';
+            document.getElementById('welfareResult').innerHTML =
+                '<div class="status pending">Loading welfare view...</div>';
+
+            fetch('/api/welfare/aboriginal-corp?fyStart=' + encodeURIComponent(fyStart))
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.success) {
+                        document.getElementById('welfareResult').innerHTML =
+                            '<div class="status disconnected">Error: ' + (data.error || 'unknown') + '</div>';
+                        return;
+                    }
+                    renderWelfareKPIs(data.summary);
+                    renderWelfareCategories(data.summary);
+                    if (data.capped) {
+                        document.getElementById('welfareCappedWarning').innerHTML =
+                            '<div class="capped-warning">⚠️ Fetched ' + data.pagesFetched + ' pages (' + data.summary.posInspected + ' POs). Hit pagination cap — there may be more POs not included.</div>';
+                    }
+                    document.getElementById('welfareResult').innerHTML =
+                        '<details><summary style="cursor: pointer; color: #6A4C93; margin-top: 10px;">Show raw JSON</summary>' +
+                        '<div class="result">' + JSON.stringify(data, null, 2) + '</div></details>';
+                })
+                .catch(err => {
+                    document.getElementById('welfareResult').innerHTML =
+                        '<div class="status disconnected">Error: ' + err.message + '</div>';
+                });
+        }
+
+        function renderWelfareKPIs(summary) {
+            const html =
+                '<div class="kpi-row">' +
+                '<div class="kpi-card"><div class="num">$' + formatMoney(summary.totalWelfareValue) + '</div><div class="label">YTD Welfare Spend</div></div>' +
+                '<div class="kpi-card"><div class="num">' + summary.totalWelfarePOs + '</div><div class="label">Welfare POs (YTD)</div></div>' +
+                '<div class="kpi-card"><div class="num">' + summary.totalWelfareYtdVsFy25Pct + '%</div><div class="label">Of FY25 total</div></div>' +
+                '<div class="kpi-card"><div class="num">' + Math.round(summary.fyPaceFraction * 100) + '%</div><div class="label">Of FY elapsed</div></div>' +
+                '</div>';
+            document.getElementById('welfareKpiRow').innerHTML = html;
+        }
+
+        function renderWelfareCategories(summary) {
+            const html = summary.categories.map(cat => {
+                const isUncat = cat.arLine === 'Uncategorised';
+                const ytd = '$' + formatMoney(cat.ytdTotal);
+                const baseline = cat.fy25Baseline ? '$' + formatMoney(cat.fy25Baseline) : '—';
+
+                let paceHtml = '';
+                if (cat.fy25Baseline && cat.projectedFullYear !== null) {
+                    const pct = cat.projectedVsBaseline;
+                    const paceClass = pct > 15 ? 'pace-over' : pct < -15 ? 'pace-under' : 'pace-on-track';
+                    const paceWord = pct > 15 ? 'ahead of' : pct < -15 ? 'behind' : 'on track with';
+                    paceHtml = '<div class="ar-caption ' + paceClass + '">' +
+                        'Projected full-year: $' + formatMoney(cat.projectedFullYear) +
+                        ' (' + (pct >= 0 ? '+' : '') + pct + '% vs FY25 baseline — ' + paceWord + ' last year)' +
+                        '</div>';
+                }
+
+                let sampleHtml = '';
+                if (isUncat && cat.sampleDescriptions && cat.sampleDescriptions.length > 0) {
+                    sampleHtml = '<details style="margin-top: 10px;"><summary style="cursor: pointer; color: #6A4C93;">Sample uncategorised POs (for rule tuning)</summary>' +
+                        '<ul style="font-size: 12px; color: #64748b;">' +
+                        cat.sampleDescriptions.map(s =>
+                            '<li><strong>' + (s.documentNumber || '(no #)') + '</strong> — ' + s.supplier + ' ($' + formatMoney(s.amount) + ', acct ' + (s.accountCode || '?') + '): <em>' + escapeHtml(s.description) + '</em></li>'
+                        ).join('') +
+                        '</ul></details>';
+                }
+
+                let recipientsHtml = '';
+                if (cat.topRecipients && cat.topRecipients.length > 0) {
+                    recipientsHtml = '<details style="margin-top: 8px;"><summary style="cursor: pointer; color: #6A4C93; font-size: 13px;">Top recipients (' + cat.uniqueRecipients + ' unique)</summary>' +
+                        '<ul style="font-size: 12px;">' +
+                        cat.topRecipients.map(r =>
+                            '<li>' + escapeHtml(r.name) + ' — $' + formatMoney(r.total) + ' across ' + r.poCount + ' POs</li>'
+                        ).join('') +
+                        '</ul></details>';
+                }
+
+                const pctOfBaseline = cat.ytdPercentOfBaseline !== undefined
+                    ? cat.ytdPercentOfBaseline + '%'
+                    : '—';
+
+                return '<div class="category-card">' +
+                    '<div class="cat-name">' + cat.arLine + (isUncat ? ' <span style="background: #fef3c7; padding: 2px 6px; border-radius: 3px; font-size: 11px;">needs tuning</span>' : '') + '</div>' +
+                    '<div class="cat-figures">' +
+                    '<div><div class="cat-fig-label">YTD</div><div class="cat-fig-value">' + ytd + '</div></div>' +
+                    '<div><div class="cat-fig-label">POs</div><div class="cat-fig-value">' + cat.ytdPOs + '</div></div>' +
+                    '<div><div class="cat-fig-label">FY25 Baseline</div><div class="cat-fig-value">' + baseline + '</div></div>' +
+                    '<div><div class="cat-fig-label">% of FY25</div><div class="cat-fig-value">' + pctOfBaseline + '</div></div>' +
+                    '</div>' +
+                    paceHtml +
+                    recipientsHtml +
+                    sampleHtml +
+                    '</div>';
+            }).join('');
+            document.getElementById('welfareCategories').innerHTML = html;
+        }
+
+        function formatMoney(n) {
+            if (n === null || n === undefined) return '—';
+            return Number(n).toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+        }
+
+        function escapeHtml(s) {
+            return String(s || '').replace(/[&<>"']/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            })[c]);
+        }
+
         function showDebugInfo() {
             fetch('/debug/info')
                 .then(r => r.json())
@@ -601,7 +798,7 @@ app.get('/', (req, res) => {
         }
 
         function enableButtons() {
-            ['btn-api-companies', 'btn-summary', 'btn-xero-type'].forEach(id => {
+            ['btn-api-companies', 'btn-summary', 'btn-xero-type', 'btn-welfare'].forEach(id => {
                 const btn = document.getElementById(id);
                 if (btn) btn.disabled = false;
             });
@@ -762,6 +959,53 @@ app.get('/api/companies', async (req, res) => {
         res.json({ success: true, count: list.length, data: list });
     } catch (error) {
         res.status(error.status || 500).json({ success: false, error: error.message, body: error.body || null });
+    }
+});
+
+// GET /api/welfare/aboriginal-corp - the "We Provided" view prototype
+// Fetches all Aboriginal Corp POs from fyStart, classifies into AR welfare
+// categories, extracts recipients, returns dashboard-shaped payload.
+//
+// Query params:
+//   fyStart      - date (YYYY-MM-DD), defaults to 2025-07-01 (FY26 start)
+//   asOfDate     - date (YYYY-MM-DD), defaults to today, used for pace calc
+app.get('/api/welfare/aboriginal-corp', async (req, res) => {
+    try {
+        const tok = await requireToken();
+        const fyStart = req.query.fyStart || DEFAULT_WELFARE_FY_START;
+        const asOfDate = req.query.asOfDate || new Date().toISOString().slice(0, 10);
+        const fyLabel = fyStart >= '2025-07-01' ? 'FY26' : fyStart >= '2024-07-01' ? 'FY25' : 'Custom FY';
+
+        console.log(`[welfare] Fetching Aboriginal Corp POs since ${fyStart}...`);
+
+        const { items: pos, pages, capped } = await fetchAllPages(
+            tok.access_token,
+            ABORIGINAL_CORP_COMPANY_ID,
+            'purchase-orders',
+            { createdAtOrAfter: fyStart }
+        );
+
+        console.log(`[welfare] Fetched ${pos.length} POs across ${pages} pages (capped=${capped}).`);
+
+        const summary = welfare.buildWelfareSummary(pos, {
+            fyStart,
+            asOfDate,
+            fyLabel
+        });
+
+        res.json({
+            success: true,
+            pagesFetched: pages,
+            capped,
+            summary
+        });
+    } catch (error) {
+        console.error('[welfare] Error:', error.message);
+        res.status(error.status || 500).json({
+            success: false,
+            error: error.message,
+            body: error.body || null
+        });
     }
 });
 
