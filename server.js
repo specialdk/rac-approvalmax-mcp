@@ -53,6 +53,12 @@ const MAX_PAGES_PER_COUNT = 20;
 // not just the count. Set higher and revisit if it becomes an issue.
 const MAX_PAGES_FOR_WELFARE = 35;  // 3,500 records max
 
+// For the entity-scan endpoint (Day 3g). Cross-entity reconnaissance pulls
+// items with line items so we can aggregate by account code. 30 pages × 100 =
+// 3,000 records per entity. Aboriginal Corp is near this cap; other entities
+// are expected to have far fewer POs.
+const MAX_PAGES_FOR_ENTITY_SCAN = 30;
+
 // Helper: pull the three new filter params from a request's query string in one go.
 // Returns { createdAtOrAfter, orderBy, orderDirection } with undefineds for absent values.
 function extractAnalysisFilters(query) {
@@ -93,8 +99,9 @@ async function countAllPages(accessToken, companyId, xeroType, baseFilters) {
 
 // Helper: fully paginate and RETURN the items themselves (unlike countAllPages).
 // Used by the welfare endpoint where we need to inspect each PO's line items,
-// tracking, and events. Uses a higher page cap (MAX_PAGES_FOR_WELFARE).
-async function fetchAllPages(accessToken, companyId, xeroType, baseFilters) {
+// tracking, and events. Accepts a configurable page cap so different callers
+// can tune the ceiling (welfare view = 35, entity scan = 30).
+async function fetchAllPages(accessToken, companyId, xeroType, baseFilters, pageCap = MAX_PAGES_FOR_WELFARE) {
     const allItems = [];
     let pages = 0;
     let continuationToken = undefined;
@@ -109,13 +116,95 @@ async function fetchAllPages(accessToken, companyId, xeroType, baseFilters) {
         allItems.push(...result.items);
         continuationToken = result.continuationToken;
         pages++;
-        if (pages >= MAX_PAGES_FOR_WELFARE && continuationToken) {
+        if (pages >= pageCap && continuationToken) {
             capped = true;
             break;
         }
     } while (continuationToken);
 
     return { items: allItems, pages, capped };
+}
+
+// Helper (Day 3g): given an array of POs, return aggregate shape data —
+// total $ value, status breakdown, top 5 suppliers by $, top 5 account codes
+// by $ and poCount, earliest/latest date seen. Purpose is to give a one-shot
+// "what does this entity's AM data look like" snapshot to inform dashboard
+// design. Does NOT do welfare-category classification — that's a separate
+// concern specific to Aboriginal Corp.
+function summarisePosShape(pos) {
+    let totalValue = 0;
+    const statusCounts = {};
+    const supplierCounts = {};
+    const supplierTotals = {};
+    const accountTotals = {};
+    let earliestDate = null;
+    let latestDate = null;
+
+    for (const po of pos) {
+        totalValue += (po.total || 0);
+
+        const status = po.requestStatus || 'unknown';
+        statusCounts[status] = (statusCounts[status] || 0) + 1;
+
+        const supplier = po.contact || 'Unknown';
+        supplierTotals[supplier] = (supplierTotals[supplier] || 0) + (po.total || 0);
+        supplierCounts[supplier] = (supplierCounts[supplier] || 0) + 1;
+
+        if (Array.isArray(po.lineItems)) {
+            for (const li of po.lineItems) {
+                const code = li.accountCode;
+                if (!code) continue;
+                if (!accountTotals[code]) {
+                    accountTotals[code] = {
+                        accountCode: code,
+                        account: li.account || null,
+                        total: 0,
+                        poCount: 0
+                    };
+                }
+                accountTotals[code].total += (li.amount || 0);
+                accountTotals[code].poCount += 1;
+            }
+        }
+
+        const poDate = po.createdAt || po.date || po.modifiedAt || null;
+        if (poDate) {
+            if (!earliestDate || poDate < earliestDate) earliestDate = poDate;
+            if (!latestDate || poDate > latestDate) latestDate = poDate;
+        }
+    }
+
+    const r2 = n => Math.round((n + Number.EPSILON) * 100) / 100;
+
+    const topSuppliersByValue = Object.entries(supplierTotals)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([name, total]) => ({
+            name,
+            total: r2(total),
+            poCount: supplierCounts[name] || 0
+        }));
+
+    const topAccountsByValue = Object.values(accountTotals)
+        .sort((a, b) => b.total - a.total)
+        .slice(0, 5)
+        .map(a => ({
+            accountCode: a.accountCode,
+            account: a.account,
+            total: r2(a.total),
+            poCount: a.poCount
+        }));
+
+    return {
+        totalValue: r2(totalValue),
+        statusCounts,
+        topSuppliersByValue,
+        topAccountsByValue,
+        earliestDate,
+        latestDate,
+        uniqueSuppliers: Object.keys(supplierTotals).length,
+        uniqueAccountCodes: Object.keys(accountTotals).length
+    };
 }
 
 // Postgres pool
@@ -282,6 +371,7 @@ app.get('/', (req, res) => {
         .section h3 { margin-top: 0; color: #4a5568; }
         .section h4 { color: #4a5568; margin-top: 16px; margin-bottom: 8px; }
         .section.welfare { border-left: 4px solid #8B5A96; background: #faf5ff; }
+        .section.scan { border-left: 4px solid #059669; background: #f0fdf4; }
         .status {
             padding: 12px;
             border-radius: 6px;
@@ -303,6 +393,8 @@ app.get('/', (req, res) => {
         }
         button:hover { background: #6A4C93; }
         button:disabled { background: #9ca3af; cursor: not-allowed; }
+        button.scan-btn { background: #059669; }
+        button.scan-btn:hover { background: #047857; }
         .result {
             background: #1f2937;
             color: #f9fafb;
@@ -411,6 +503,19 @@ app.get('/', (req, res) => {
             <p>Runs the ApprovalMax OAuth flow. Tokens persist and auto-refresh before expiry.</p>
             <button onclick="startAuth()">Start ApprovalMax Authentication</button>
             <div id="authResult"></div>
+        </div>
+
+        <div class="section scan">
+            <h3>Cross-Entity Reconnaissance (Day 3g)</h3>
+            <p style="color: #64748b; font-size: 13px;">
+                One-shot scan of all 7 entities. For each: total PO count &amp; $, top 5 suppliers, top 5 account codes,
+                status breakdown, date range. Purpose: inform dashboard design decisions about which entities need
+                dedicated views and what the dominant procurement "story" is for each.
+            </p>
+            <div class="button-grid">
+                <button onclick="fetchEntityScan()" disabled id="btn-entity-scan" class="scan-btn">Run entity scan (all 7 orgs, post-AM-era)</button>
+            </div>
+            <div id="entityScanResult"></div>
         </div>
 
         <div class="section welfare">
@@ -657,6 +762,21 @@ app.get('/', (req, res) => {
                 });
         }
 
+        function fetchEntityScan() {
+            document.getElementById('entityScanResult').innerHTML =
+                '<div class="status pending">Scanning all 7 entities... this pulls POs with line items so expect 60–180 seconds.</div>';
+            fetch('/api/am/entity-scan')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('entityScanResult').innerHTML =
+                        '<div class="result">' + JSON.stringify(data, null, 2) + '</div>';
+                })
+                .catch(err => {
+                    document.getElementById('entityScanResult').innerHTML =
+                        '<div class="status disconnected">Error: ' + err.message + '</div>';
+                });
+        }
+
         function renderSummaryKPIs(data) {
             if (!data || !data.success) return;
             const html =
@@ -798,7 +918,7 @@ app.get('/', (req, res) => {
         }
 
         function enableButtons() {
-            ['btn-api-companies', 'btn-summary', 'btn-xero-type', 'btn-welfare'].forEach(id => {
+            ['btn-api-companies', 'btn-summary', 'btn-xero-type', 'btn-welfare', 'btn-entity-scan'].forEach(id => {
                 const btn = document.getElementById(id);
                 if (btn) btn.disabled = false;
             });
@@ -982,7 +1102,8 @@ app.get('/api/welfare/aboriginal-corp', async (req, res) => {
             tok.access_token,
             ABORIGINAL_CORP_COMPANY_ID,
             'purchase-orders',
-            { createdAtOrAfter: fyStart }
+            { createdAtOrAfter: fyStart },
+            MAX_PAGES_FOR_WELFARE
         );
 
         console.log(`[welfare] Fetched ${pos.length} POs across ${pages} pages (capped=${capped}).`);
@@ -1005,6 +1126,82 @@ app.get('/api/welfare/aboriginal-corp', async (req, res) => {
             success: false,
             error: error.message,
             body: error.body || null
+        });
+    }
+});
+
+// GET /api/am/entity-scan - cross-entity reconnaissance (Day 3g)
+// For each connected AM company, paginates through POs (post-AM-era only by
+// default) and returns aggregate shape data per entity: total count, total $
+// value, top 5 suppliers by value, top 5 account codes by value, status
+// breakdown, earliest/latest date. Purpose: inform dashboard design
+// decisions about which entities justify dedicated views and what the
+// dominant procurement "story" is for each.
+//
+// Query params:
+//   createdAtOrAfter - date, defaults to DEFAULT_AM_ERA_CUTOFF (2025-06-01)
+app.get('/api/am/entity-scan', async (req, res) => {
+    try {
+        const tok = await requireToken();
+        const createdAtOrAfter = req.query.createdAtOrAfter || DEFAULT_AM_ERA_CUTOFF;
+
+        let companies = Array.isArray(tok.organizations) ? tok.organizations : [];
+        if (companies.length === 0) {
+            const fresh = await amClient.getCompanies(tok.access_token);
+            companies = Array.isArray(fresh) ? fresh : (fresh?.data || []);
+        }
+
+        console.log(`[entity-scan] Starting scan of ${companies.length} entities (createdAtOrAfter=${createdAtOrAfter})`);
+
+        const entitySummaries = [];
+        for (const company of companies) {
+            const companyId = company.companyId || company.id;
+            const companyName = company.name || 'Unknown';
+            try {
+                console.log(`[entity-scan] Fetching ${companyName}...`);
+                const { items: pos, pages, capped } = await fetchAllPages(
+                    tok.access_token,
+                    companyId,
+                    'purchase-orders',
+                    { createdAtOrAfter },
+                    MAX_PAGES_FOR_ENTITY_SCAN
+                );
+                const shape = summarisePosShape(pos);
+                console.log(`[entity-scan] ${companyName}: ${pos.length} POs, $${shape.totalValue}, ${pages} pages (capped=${capped})`);
+                entitySummaries.push({
+                    companyId,
+                    companyName,
+                    pagesFetched: pages,
+                    capped,
+                    posTotal: pos.length,
+                    ...shape
+                });
+            } catch (err) {
+                console.error(`[entity-scan] Error on ${companyName}:`, err.message);
+                entitySummaries.push({
+                    companyId,
+                    companyName,
+                    error: err.message,
+                    body: err.body || null
+                });
+            }
+        }
+
+        // Sort entities by posTotal desc so the dominant ones are at the top.
+        entitySummaries.sort((a, b) => (b.posTotal || 0) - (a.posTotal || 0));
+
+        res.json({
+            success: true,
+            createdAtOrAfter,
+            entityCount: companies.length,
+            paginationCap: MAX_PAGES_FOR_ENTITY_SCAN,
+            entitySummaries
+        });
+    } catch (error) {
+        console.error('[entity-scan] Top-level error:', error.message);
+        res.status(error.status || 500).json({
+            success: false,
+            error: error.message
         });
     }
 });
