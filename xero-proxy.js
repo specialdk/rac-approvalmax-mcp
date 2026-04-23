@@ -103,9 +103,19 @@ async function fetchProfitLoss(orgName, periodMonths = 10, date) {
 // The report has nested Sections (Income, Operating Expenses, Net Profit);
 // each Row's cells are [accountName, month1, month2, ...]. We sum non-total
 // rows within Income and Expense sections across all periods shown.
+//
+// IMPORTANT: income section match is EXACT (not substring). Day 3j sanity
+// check found title.includes('income') double-counted rollup sections like
+// "Net Income" and "Gross Profit" on top of the actual "Income" section,
+// inflating revenue ~2.2x. Expense side uses substring and works correctly
+// because Xero only emits one "Operating Expenses" / "Less Operating
+// Expenses" / "Cost of Sales" section per report — no expense rollups.
+// The matchedSections diagnostic in the return value lets us verify which
+// section titles were summed without redeploying.
 function parseBudgetReport(report) {
     let revenue = 0;
     let expenses = 0;
+    const matchedSections = { income: [], expense: [] };
 
     const rows = report?.rows || [];
 
@@ -113,9 +123,11 @@ function parseBudgetReport(report) {
         if (section.rowType !== 'Section' || !Array.isArray(section.rows)) continue;
         const title = (section.title || '').toLowerCase();
 
-        const isIncome  = title.includes('income') || title.includes('revenue');
+        const isIncome  = title === 'income' || title === 'revenue' || title === 'trading income';
         const isExpense = title.includes('expense');
         if (!isIncome && !isExpense) continue;
+
+        (isIncome ? matchedSections.income : matchedSections.expense).push(section.title);
 
         for (const row of section.rows) {
             if (row.rowType !== 'Row' || !Array.isArray(row.cells)) continue;
@@ -137,7 +149,8 @@ function parseBudgetReport(report) {
     return {
         revenue: r2(revenue),
         expenses: r2(expenses),
-        netProfit: r2(revenue - expenses)
+        netProfit: r2(revenue - expenses),
+        matchedSections
     };
 }
 
