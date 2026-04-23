@@ -123,6 +123,16 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
 .data-table .family-row td:first-child { font-family: 'IBM Plex Serif', serif; font-weight: 500; font-size: 14px; }
 .data-table .placeholder-row td { color: var(--ink-faint); font-style: italic; text-align: center; padding: 20px; }
 
+/* Budget vs Actual card (FY26 Xero data) */
+.budget-section { margin-bottom: 24px; }
+.budget-table td.num.pct { font-family: 'IBM Plex Serif', serif; font-size: 15px; font-weight: 500; }
+.budget-table td.num.pct.ok { color: var(--moss); }
+.budget-table td.num.pct.warn { color: var(--ochre); }
+.budget-table td.num.pct.alert { color: var(--terra); }
+.budget-table .row-label { font-family: 'IBM Plex Serif', serif; font-weight: 500; font-size: 14px; color: var(--ink); }
+.budget-table .row-label .line-sub { font-family: 'IBM Plex Mono', monospace; font-size: 10px; font-weight: 400; color: var(--ink-mute); display: block; margin-top: 2px; letter-spacing: 0.5px; text-transform: uppercase; }
+.budget-table td.net-note { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--ink-mute); font-style: italic; text-align: right; letter-spacing: 0.5px; text-transform: uppercase; }
+
 .welfare-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); }
 .welfare-card { background: var(--paper); padding: 16px 18px; min-height: 120px; display: flex; flex-direction: column; justify-content: space-between; }
 .welfare-card-name { font-family: 'IBM Plex Serif', serif; font-size: 14px; font-weight: 500; color: var(--ink); margin-bottom: 6px; line-height: 1.3; }
@@ -291,6 +301,44 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
             </div>
         </div>
 
+        <!-- FY26 Budget vs Actual -->
+        <div class="card budget-section">
+            <div class="card-head">
+                <div class="card-title">FY26 Budget vs Actual</div>
+                <div class="card-meta"><span id="budgetPaceMeta_aborig">—</span> of FY elapsed · YTD through <span id="budgetAsOfMeta_aborig">—</span></div>
+            </div>
+            <table class="data-table budget-table">
+                <thead>
+                    <tr>
+                        <th>Line</th>
+                        <th class="num">Full-year budget</th>
+                        <th class="num">YTD actual</th>
+                        <th class="num">% of budget</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="row-label">Revenue</td>
+                        <td class="num" id="budgetRev_aborig">—</td>
+                        <td class="num" id="actualRev_aborig">—</td>
+                        <td class="num pct" id="pctRev_aborig">—</td>
+                    </tr>
+                    <tr>
+                        <td class="row-label">Costs<span class="line-sub">operating + cost of sales</span></td>
+                        <td class="num" id="budgetCost_aborig">—</td>
+                        <td class="num" id="actualCost_aborig">—</td>
+                        <td class="num pct" id="pctCost_aborig">—</td>
+                    </tr>
+                    <tr>
+                        <td class="row-label">Net profit</td>
+                        <td class="num" id="budgetNet_aborig">—</td>
+                        <td class="num" id="actualNet_aborig">—</td>
+                        <td class="net-note" id="netNote_aborig">—</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
         <div class="section-head"><h2>Welfare categories — YTD vs FY25 baseline</h2><div class="section-kicker">Source: Annual Report p.14–15</div></div>
         <div class="welfare-grid" id="welfareGrid">
             <div class="welfare-card"><div class="placeholder-row" style="color: var(--ink-faint); font-style: italic; grid-column: 1 / -1; padding: 20px;">Loading welfare categories…</div></div>
@@ -340,6 +388,45 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
                 <div class="quickstat-row"><span class="quickstat-label">Top supplier share</span><span class="quickstat-val" id="entTopShare">—</span></div>
             </div>
         </div>
+
+        <!-- FY26 Budget vs Actual -->
+        <div class="card budget-section">
+            <div class="card-head">
+                <div class="card-title">FY26 Budget vs Actual</div>
+                <div class="card-meta"><span id="budgetPaceMeta_enterprises">—</span> of FY elapsed · YTD through <span id="budgetAsOfMeta_enterprises">—</span></div>
+            </div>
+            <table class="data-table budget-table">
+                <thead>
+                    <tr>
+                        <th>Line</th>
+                        <th class="num">Full-year budget</th>
+                        <th class="num">YTD actual</th>
+                        <th class="num">% of budget</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="row-label">Revenue</td>
+                        <td class="num" id="budgetRev_enterprises">—</td>
+                        <td class="num" id="actualRev_enterprises">—</td>
+                        <td class="num pct" id="pctRev_enterprises">—</td>
+                    </tr>
+                    <tr>
+                        <td class="row-label">Costs<span class="line-sub">operating + cost of sales</span></td>
+                        <td class="num" id="budgetCost_enterprises">—</td>
+                        <td class="num" id="actualCost_enterprises">—</td>
+                        <td class="num pct" id="pctCost_enterprises">—</td>
+                    </tr>
+                    <tr>
+                        <td class="row-label">Net profit</td>
+                        <td class="num" id="budgetNet_enterprises">—</td>
+                        <td class="num" id="actualNet_enterprises">—</td>
+                        <td class="net-note" id="netNote_enterprises">—</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
         <div class="content-grid">
             <div class="card">
                 <div class="card-head"><div class="card-title">Top projects / contracts</div><div class="card-meta">by supplier · YTD value</div></div>
@@ -375,6 +462,45 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
                 <div class="quickstat-row"><span class="quickstat-label">Account codes used</span><span class="quickstat-val" id="rpmmsAccounts">—</span></div>
             </div>
         </div>
+
+        <!-- FY26 Budget vs Actual -->
+        <div class="card budget-section">
+            <div class="card-head">
+                <div class="card-title">FY26 Budget vs Actual</div>
+                <div class="card-meta"><span id="budgetPaceMeta_rpmms">—</span> of FY elapsed · YTD through <span id="budgetAsOfMeta_rpmms">—</span></div>
+            </div>
+            <table class="data-table budget-table">
+                <thead>
+                    <tr>
+                        <th>Line</th>
+                        <th class="num">Full-year budget</th>
+                        <th class="num">YTD actual</th>
+                        <th class="num">% of budget</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="row-label">Revenue</td>
+                        <td class="num" id="budgetRev_rpmms">—</td>
+                        <td class="num" id="actualRev_rpmms">—</td>
+                        <td class="num pct" id="pctRev_rpmms">—</td>
+                    </tr>
+                    <tr>
+                        <td class="row-label">Costs<span class="line-sub">operating + cost of sales</span></td>
+                        <td class="num" id="budgetCost_rpmms">—</td>
+                        <td class="num" id="actualCost_rpmms">—</td>
+                        <td class="num pct" id="pctCost_rpmms">—</td>
+                    </tr>
+                    <tr>
+                        <td class="row-label">Net profit</td>
+                        <td class="num" id="budgetNet_rpmms">—</td>
+                        <td class="num" id="actualNet_rpmms">—</td>
+                        <td class="net-note" id="netNote_rpmms">—</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
         <div class="content-grid">
             <div class="card">
                 <div class="card-head"><div class="card-title">Materials &amp; tools — where the jobs go</div><div class="card-meta">by account code</div></div>
@@ -410,6 +536,45 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
                 <div class="quickstat-row"><span class="quickstat-label">Suppliers</span><span class="quickstat-val" id="miningSuppliers">—</span></div>
             </div>
         </div>
+
+        <!-- FY26 Budget vs Actual -->
+        <div class="card budget-section">
+            <div class="card-head">
+                <div class="card-title">FY26 Budget vs Actual</div>
+                <div class="card-meta"><span id="budgetPaceMeta_mining">—</span> of FY elapsed · YTD through <span id="budgetAsOfMeta_mining">—</span></div>
+            </div>
+            <table class="data-table budget-table">
+                <thead>
+                    <tr>
+                        <th>Line</th>
+                        <th class="num">Full-year budget</th>
+                        <th class="num">YTD actual</th>
+                        <th class="num">% of budget</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="row-label">Revenue</td>
+                        <td class="num" id="budgetRev_mining">—</td>
+                        <td class="num" id="actualRev_mining">—</td>
+                        <td class="num pct" id="pctRev_mining">—</td>
+                    </tr>
+                    <tr>
+                        <td class="row-label">Costs<span class="line-sub">operating + cost of sales</span></td>
+                        <td class="num" id="budgetCost_mining">—</td>
+                        <td class="num" id="actualCost_mining">—</td>
+                        <td class="num pct" id="pctCost_mining">—</td>
+                    </tr>
+                    <tr>
+                        <td class="row-label">Net profit</td>
+                        <td class="num" id="budgetNet_mining">—</td>
+                        <td class="num" id="actualNet_mining">—</td>
+                        <td class="net-note" id="netNote_mining">—</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
         <div class="content-grid">
             <div class="card">
                 <div class="card-head"><div class="card-title">Where the fuel and plant dollars go</div><div class="card-meta">by account code</div></div>
@@ -445,6 +610,45 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
                 <div class="quickstat-row"><span class="quickstat-label">Biggest PO</span><span class="quickstat-val" id="investBiggestPo">—</span></div>
             </div>
         </div>
+
+        <!-- FY26 Budget vs Actual -->
+        <div class="card budget-section">
+            <div class="card-head">
+                <div class="card-title">FY26 Budget vs Actual</div>
+                <div class="card-meta"><span id="budgetPaceMeta_invest">—</span> of FY elapsed · YTD through <span id="budgetAsOfMeta_invest">—</span></div>
+            </div>
+            <table class="data-table budget-table">
+                <thead>
+                    <tr>
+                        <th>Line</th>
+                        <th class="num">Full-year budget</th>
+                        <th class="num">YTD actual</th>
+                        <th class="num">% of budget</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="row-label">Revenue</td>
+                        <td class="num" id="budgetRev_invest">—</td>
+                        <td class="num" id="actualRev_invest">—</td>
+                        <td class="num pct" id="pctRev_invest">—</td>
+                    </tr>
+                    <tr>
+                        <td class="row-label">Costs<span class="line-sub">operating + cost of sales</span></td>
+                        <td class="num" id="budgetCost_invest">—</td>
+                        <td class="num" id="actualCost_invest">—</td>
+                        <td class="num pct" id="pctCost_invest">—</td>
+                    </tr>
+                    <tr>
+                        <td class="row-label">Net profit</td>
+                        <td class="num" id="budgetNet_invest">—</td>
+                        <td class="num" id="actualNet_invest">—</td>
+                        <td class="net-note" id="netNote_invest">—</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
         <div class="content-grid">
             <div class="card">
                 <div class="card-head"><div class="card-title">Top capital-works accounts</div><div class="card-meta">property portfolio</div></div>
@@ -520,8 +724,10 @@ const AR_BASELINES = {
 const state = {
     welfare: null,
     scan: null,
+    budget: null,
     welfareError: null,
-    scanError: null
+    scanError: null,
+    budgetError: null
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1054,6 +1260,82 @@ function renderAborigPanel() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+//   Render — budget vs actual (FY26 Xero, per-entity cards)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// One card per entity panel. Compares fy26Budget (full-year) against
+// ytdActual.totalCosts (which correctly includes COGS for trading entities).
+// Colour logic is pace-aware: at 10/12 months elapsed, the pace is 83%.
+// Revenue: green if ≥ pace-8 (≥75%), amber if ≥ pace-20 (≥63%), red below.
+// Costs:   green if ≤ pace+8 (≤91%), amber if ≤ pace+20 (≤103%), red above.
+
+function renderBudgetCards() {
+    if (!state.budget || !state.budget.entities) return;
+
+    const { entities, period } = state.budget;
+    const monthsElapsed = period.monthsElapsed || 0;
+    const pacePctNum = Math.round((monthsElapsed / 12) * 100);
+
+    // Format "23 Apr" from ISO
+    const asOfDate = period.asOfDate ? new Date(period.asOfDate) : new Date();
+    const asOfDisplay = asOfDate.toLocaleDateString('en-AU', { day: '2-digit', month: 'short' });
+
+    entities.forEach(e => {
+        const key = e.entityKey;
+        const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+        const setPctClass = (id, tier) => { const el = document.getElementById(id); if (el) el.className = 'num pct ' + tier; };
+
+        setText('budgetPaceMeta_' + key, pacePctNum + '%');
+        setText('budgetAsOfMeta_' + key, asOfDisplay);
+
+        if (e.error) {
+            setText('budgetRev_' + key, 'err');
+            setText('actualRev_' + key, '—');
+            setText('pctRev_' + key, '—');
+            setText('budgetCost_' + key, 'err');
+            setText('actualCost_' + key, '—');
+            setText('pctCost_' + key, '—');
+            setText('budgetNet_' + key, '—');
+            setText('actualNet_' + key, '—');
+            setText('netNote_' + key, e.error.slice(0, 40));
+            return;
+        }
+
+        const b = e.fy26Budget || {};
+        const a = e.ytdActual || {};
+
+        // Revenue row
+        setText('budgetRev_' + key, moneyK(b.revenue));
+        setText('actualRev_' + key, moneyK(a.revenue));
+        const revPct = b.revenue > 0 ? Math.round((a.revenue / b.revenue) * 100) : 0;
+        setText('pctRev_' + key, revPct + '%');
+        const revTier = revPct >= pacePctNum - 8 ? 'ok'
+            : revPct >= pacePctNum - 20 ? 'warn' : 'alert';
+        setPctClass('pctRev_' + key, revTier);
+
+        // Costs row — uses totalCosts (includes COGS where applicable)
+        setText('budgetCost_' + key, moneyK(b.expenses));
+        setText('actualCost_' + key, moneyK(a.totalCosts));
+        const costPct = b.expenses > 0 ? Math.round((a.totalCosts / b.expenses) * 100) : 0;
+        setText('pctCost_' + key, costPct + '%');
+        const costTier = costPct <= pacePctNum + 8 ? 'ok'
+            : costPct <= pacePctNum + 20 ? 'warn' : 'alert';
+        setPctClass('pctCost_' + key, costTier);
+
+        // Net row — no % column, annotate with a short note instead
+        setText('budgetNet_' + key, moneyK(b.netProfit));
+        setText('actualNet_' + key, moneyK(a.netProfit));
+        let note = '';
+        if (a.netProfit != null && a.netProfit < 0) {
+            note = 'loss YTD';
+        } else if (b.netProfit > 0 && a.netProfit > b.netProfit) {
+            note = 'ahead of FY goal';
+        }
+        setText('netNote_' + key, note);
+    });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 //   Data loading
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1125,6 +1407,28 @@ async function loadEntityScan() {
     }
 }
 
+// Budget load is independent of AM auth — the /api/budget-vs-actual endpoint
+// is a server-to-server proxy to Matt's Xero API and doesn't require a user
+// session. Failure here does NOT block the AM banner going to "Live".
+async function loadBudgetVsActual() {
+    try {
+        const res = await fetch('/api/budget-vs-actual');
+        if (!res.ok) throw new Error('Status ' + res.status);
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Budget endpoint failed');
+        state.budget = data;
+        renderBudgetCards();
+    } catch (err) {
+        state.budgetError = err.message;
+        // Surface the error inline on each card so it's obvious something's wrong,
+        // but don't kill the banner.
+        ['aborig', 'enterprises', 'rpmms', 'mining', 'invest'].forEach(key => {
+            const noteEl = document.getElementById('netNote_' + key);
+            if (noteEl) noteEl.textContent = 'budget fetch failed';
+        });
+    }
+}
+
 async function boot() {
     renderMasthead();
     setStatus('loading', 'Loading', 'Loading live data from ApprovalMax… allow ~60–180s on first load');
@@ -1138,9 +1442,10 @@ async function boot() {
         return;
     }
 
-    // Fire both in parallel. Each updates the banner + its sections on completion.
+    // Fire three in parallel. Each updates its own sections on completion.
     loadWelfare();
     loadEntityScan();
+    loadBudgetVsActual();
 }
 
 boot();
