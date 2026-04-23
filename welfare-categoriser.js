@@ -27,17 +27,84 @@ const FY25_AR_BASELINES = {
 };
 
 const FY25_AR_TOTAL = Object.values(FY25_AR_BASELINES).reduce((a, b) => a + b, 0);
-// = $2,247,213 (rounds close to the AR's $2,341,481 — difference is sponsorships
-// and the Denise Fincham Education Fund contribution which sit outside the
-// "We Provided" member-welfare category in the AR).
+
+// -----------------------------------------------------------------------------
+// Rirratjingu-specific names (Day 3d)
+// -----------------------------------------------------------------------------
+//
+// Sourced from "Rirratjingu Staff Contacts - January 2026" provided by Duane.
+// Used to disambiguate recipient extraction: when a staff name appears in a
+// PO description, we need to know whether they're the actual welfare
+// beneficiary, or acting as an intermediary (picking up / handling on behalf
+// of a clan member).
+
+// Non-clan RAC staff. If one of these names is extracted as the "recipient",
+// it's almost certainly an intermediary or operational role, not the actual
+// welfare recipient. Filtered out of recipient attribution (but the PO may
+// still classify correctly via account code or other signals).
+//
+// IMPORTANT: Does NOT include staff who are also Yolŋu clan/community
+// members — they can legitimately receive welfare:
+//   Rylee Ford (Culture & Community Manager)
+//   Elenie Bromot (Cultural Learning Coordinator)
+//   Zoe Bromot (Member Support Officer)
+//   Tiani Mununggurritj (C&C Project Support Officer)
+//   Djay Marika (Career Pathway Mentor)
+//   Shakira Marika (Administration Support)
+//   Jaclyn Bromot (Career Pathway Coordinator)
+//   Wilisoni "Wil" Lotu (Career Pathway Coordinator)
+//   Paula Gumana (Employment & Training)
+// All Directors are also clan — never listed here.
+const NON_CLAN_STAFF_NAMES = new Set([
+    // Exec
+    'Rhian Oliver', 'Jade Van Beelen', 'Paul Martin', 'Samuel Hinton',
+    // Finance
+    'Matt Muscat', 'Nancy Halafihi', 'Saheel Shah', 'Himanshu Pathak',
+    'Kabita Adhikari',
+    // Administration
+    'Rachael Coonan', 'Shawn Mhaka',
+    // Corporate Services
+    'Brodie Apthorpe', 'Rachael Schofield', 'Adrian Rota', 'Duane Kuru',
+    'Jodie Douglas', 'Cassandra Richert', 'Jamie Schofield',
+    // Culture & Community (non-clan)
+    'Peter Reeves',
+    // Mining / Enterprises / Fuel
+    'Gavin Law', 'James Ball', 'Uheina Gillon', 'Matthew Henger',
+    'Paul McLoughlin', 'Warwick Mylchreest', 'Jarrad Ernst',
+    // Employment & Training (non-clan)
+    'Peter Britto',
+    // RPMMS
+    'Sam Dentith', 'Max Edema', 'Chris Lamboa', 'Kai Mooney',
+    'Jack Aragu', 'Danielle Stolte'
+]);
+
+// Yolŋu / Rirratjingu clan surnames. Any 2+ word capitalised name ending in
+// one of these is presumptively a real clan welfare recipient, even when the
+// primary regex misses the trigger word. Powers the Priority-3 fallback in
+// extractRecipient().
+const CLAN_SURNAMES = [
+    'Marika', 'Yunupingu', 'Garrawurra', 'Bukulatjpi', 'Dhamarrandji',
+    'Wanapuyngu', 'Gumana', 'Bromot', 'Ulamari', 'Mununggurritj',
+    'Lotu', 'Rarrkminy'
+];
+
+// Compiled regex for scanning a description for "First [Middle] Last" where
+// Last is a known clan surname. Global flag so we can find all matches and
+// pick the best (non-denylisted) one.
+const CLAN_SURNAME_SCAN_REGEX = new RegExp(
+    String.raw`\b([A-Z][a-z]+(?:\s+(?:[A-Z]\.?|[A-Z][a-z]+))*\s+(?:${CLAN_SURNAMES.join('|')}))\b`,
+    'g'
+);
+
+// "on behalf of" override regex. When this matches, the captured name takes
+// priority over whatever the primary regex might have captured.
+const ON_BEHALF_OF_REGEX = /\bon\s+behalf\s+of\s+([A-Z][a-z]+(?:\s+(?:[A-Z]\.?|[A-Z][a-z]+))*\s+[A-Z][a-z]+(?:\s+(?:&|and)\s+[Ff]amily)?)/;
 
 // -----------------------------------------------------------------------------
 // Rule sets (ordered by specificity — first match wins within each tier)
 // -----------------------------------------------------------------------------
 
 // High-confidence supplier + specific-account-code combinations.
-// These fire BEFORE the generic rules because a supplier + account pairing is
-// a stronger signal than either alone.
 const SUPPLIER_ACCOUNT_COMBOS = [
     {
         supplierPattern: /\bbp\b/i,
@@ -56,14 +123,8 @@ const SUPPLIER_ACCOUNT_COMBOS = [
 ];
 
 // Supplier name patterns that indicate a category regardless of account code.
-// Ordered by specificity - first match wins.
-//
-// These fire BEFORE account-code family hints (Day 3c), so that e.g. an
-// MAF International flight coded to a 250xx voucher account still gets
-// classified as Transport Assistance (matching the AR's line-item split)
-// rather than Family Charitable. The rule of thumb: if we already know the
-// supplier is specifically a transport/funeral/medical/whitegoods vendor,
-// that trumps the account code.
+// Fires before account-code family hints so known transport/funeral/medical/
+// whitegoods/cultural vendors keep their specific AR line.
 const SUPPLIER_CATEGORY_HINTS = [
     // Road transport
     { pattern: /gove transport|taxi|letsgo/i,     category: 'Transport Assistance' },
@@ -74,19 +135,12 @@ const SUPPLIER_CATEGORY_HINTS = [
     // Medical / pharmacy
     { pattern: /medical|pharma|chemist|clinic|hospital/i, category: 'Medical & Terminally Ill' },
     // Whitegoods / large-appliance retail
-    { pattern: /harvey norman|the good guys|appliances online|bing lee/i, category: 'Whitegoods' }
+    { pattern: /harvey norman|the good guys|appliances online|bing lee/i, category: 'Whitegoods' },
+    // Cultural / arts (Day 3d: Buku Larrngay Mulka is the Yirrkala art centre)
+    { pattern: /buku larrngay/i,                   category: 'Culture & Ceremony Support' }
 ];
 
-// Account code family → category hints.
-// Fires AFTER supplier-name hints (so aviation/funeral/medical suppliers win
-// regardless of account code) but BEFORE account-code-specific fallbacks.
-// Useful when a code family consistently maps to one welfare category for
-// everyone *except* specific supplier types.
-//
-// Day 3 sampling: the 250xx code family (25002 through 25009 sighted across
-// samples) is RAC's chart-of-accounts family for member charitable vouchers.
-// Used across many suppliers — Yirrkala Enterprises, BP Nhulunbuy, Elcho Group
-// / Bottom Shop, Gove Warehouse, Arnhemland Progress, etc.
+// Account code family → category hints (supplier-agnostic, high confidence).
 const ACCOUNT_CODE_CATEGORY_HINTS = [
     {
         pattern: /^250\d{2}$/,
@@ -96,68 +150,65 @@ const ACCOUNT_CODE_CATEGORY_HINTS = [
     }
 ];
 
+// Description-keyword hints (medium confidence). Fire after supplier/account
+// hints but before the recipient-fallback. Useful when a one-off event is
+// clear from the description but the supplier/account don't carry the signal.
+const DESCRIPTION_CATEGORY_HINTS = [
+    {
+        pattern: /\bceremon(?:y|ial|ies)\b|\bbu[ŋn]gul\b|ceremonial\s+ground/i,
+        category: 'Culture & Ceremony Support',
+        confidence: 'medium',
+        reason: 'description mentions ceremony/ceremonial/buŋgul'
+    }
+];
+
 // Internal corporate spend patterns (description-based).
-// These POs are NOT welfare even though they appear in Aboriginal Corp.
-// Detected by description keywords that name corporate assets or activities
-// (vehicle regos, office/building work, RAC staff pickups).
 const INTERNAL_CORPORATE_DESCRIPTION_PATTERNS = [
     /\b[A-Z]{2}\d{2}[A-Z]{2}\b/,              // NT vehicle rego pattern (e.g. CE03AQ)
     /\bstandard service\b/i,
     /\boffice\b/i,
     /\bboardroom\b/i,
     /\bstaff meeting\b/i,
-    /\bpick ?up by rac\b/i,                   // Day 3a: "Pick up by RAC Staff"
+    /\bpick ?up by rac\b/i,
     /\bfor rac staff\b/i,
     /\brac office\b/i
 ];
 
 // Internal corporate spend patterns (supplier-based).
 // Suppliers that are either other RAC trading entities (intercompany billing)
-// or operational service providers for non-welfare activities (printing,
-// signage, IT, framing, postage). These are almost never true welfare spend.
-// Added Day 3c after sampling exposed $125K+ from these suppliers in the
-// Uncategorised bucket.
+// or operational vendors for non-welfare activities.
 const INTERNAL_CORPORATE_SUPPLIER_PATTERNS = [
-    /^rirratjingu /i,        // Intercompany: RAC's own trading entities
+    /^rirratjingu /i,             // Intercompany: RAC's own trading entities
     /\bzip print\b/i,
-    /\bdon whyte\b/i,        // Don Whyte Framing
+    /\bdon whyte\b/i,             // Don Whyte Framing
     /\bthe pin factory\b/i,
     /\ball flags and signs\b/i,
-    /\bbz technology\b/i
+    /\bbz technology\b/i,
+    /\bofficeworks\b/i,           // Day 3d: ~$15K of "stationary" in Uncategorised
+    /\bbig nt print\b/i,          // Day 3d: printing vendor
+    /\bcarwash kingz\b/i          // Day 3d: vehicle washing (operational)
 ];
 
 // Primary recipient extractor. Matches:
 //   "to First Last"             → "First Last"
 //   "for First Last"            → "First Last"
-//   "to First M Last"           → "First M Last"   (middle initial, with or without period)
+//   "to First M Last"           → "First M Last"
 //   "to First Middle Last"      → "First Middle Last"
 //   "passenger: First Last"     → "First Last"
 //   "required by First Last"    → "First Last"
-//   "requested by First Last"   → "First Last"     (Day 3c)
+//   "requested by First Last"   → "First Last"
 //   optional "... and Family" / "... & Family" suffix
-//
-// History:
-//   Day 2:  base pattern matched "to/for [Name]" only.
-//   Day 3a: added middle-initial branch ([A-Z]\.?), "passenger:" prefix,
-//           case-insensitive "[Ff]amily" suffix.
-//   Day 3b: added "required by" prefix — dominant phrasing after 2nd sampling.
-//   Day 3c: added "requested by" (alternative verb, same structure).
 const RECIPIENT_REGEX = /\b(?:[Tt]o|[Ff]or|[Pp]assenger|[Rr]equ(?:ired|ested)\s+[Bb]y)\b[:\s]+([A-Z][a-z]+(?:\s+(?:[A-Z]\.?|[A-Z][a-z]+))*\s+[A-Z][a-z]+(?:\s+(?:&|and)\s+[Ff]amily)?)/;
 
 // Strings that the regex may extract but which are not actual people.
-// These are places, supplier names, project names, or generic nouns that
-// happen to match the "two capitalised words" pattern.
 const NON_PERSON_NAMES = new Set([
-    // Places / venues
     'Ski Beach', 'Boat Club', 'Gove Dhalinbuy', 'Yanawal Units',
     'Hospital Driver', 'Hospital Pickup', 'Training Group',
-    // Supplier names that sometimes show up as "to Air Frontier" etc.
     'Air Frontier', 'Black Diamond', 'Yirrkala Enterprises',
     'Gove Warehouse', 'Gove Transport', 'BP Nhulunbuy',
     'Peninsula Bakery', 'Kamayan Cafe', 'Territory Funerals',
     'Simplicity Funerals', 'Harvey Norman', 'Sodexo Remote',
     'MAF International',
-    // Project / event names (Day 3b)
     'Country Music Video'
 ]);
 
@@ -173,9 +224,7 @@ const PLACE_FIRST_WORDS = new Set([
 // -----------------------------------------------------------------------------
 
 /**
- * Return combined description text for a PO, with whitespace normalised so
- * newlines (\n, \r) and multiple spaces don't break the recipient regex or
- * pollute extracted names.
+ * Return combined description text for a PO, with whitespace normalised.
  */
 function combinedDescription(po) {
     return (po.lineItems || [])
@@ -184,41 +233,86 @@ function combinedDescription(po) {
 }
 
 /**
- * Normalise the trailing "and family" / "& family" capitalisation variants
- * so "Name and Family" and "Name and family" don't appear as separate
- * entries in topRecipients. Always yields " and Family" (title case).
+ * Normalise the trailing "and family" / "& family" capitalisation.
  */
 function normalizeRecipientName(name) {
     return name.replace(/\s+(&|and)\s+family$/i, ' and Family');
 }
 
 /**
+ * True if the name is filtered out (non-person, place-first-word, or
+ * non-clan staff acting as intermediary).
+ */
+function isDenylistedName(name) {
+    if (NON_PERSON_NAMES.has(name)) return true;
+    if (NON_CLAN_STAFF_NAMES.has(name)) return true;
+    const firstWord = name.split(' ')[0];
+    if (PLACE_FIRST_WORDS.has(firstWord)) return true;
+    return false;
+}
+
+/**
+ * Scan description text for any "First [Middle] Last" pattern where Last is
+ * a known clan surname. Returns the first non-denylisted match or null.
+ * Used as Priority-3 fallback when primary trigger-based regex misses.
+ */
+function scanForClanSurname(text) {
+    // Reset regex state (global flag means it tracks position across calls)
+    CLAN_SURNAME_SCAN_REGEX.lastIndex = 0;
+    const matches = text.matchAll(CLAN_SURNAME_SCAN_REGEX);
+    for (const m of matches) {
+        const candidate = m[1].trim();
+        if (!isDenylistedName(candidate)) {
+            return candidate;
+        }
+    }
+    return null;
+}
+
+/**
  * Extract a recipient name from a PO's combined line-item descriptions.
- * Returns null if no match found or if the match is on the non-person denylist.
+ * Priority-tiered extraction (Day 3d):
+ *   1. "on behalf of X" override — X is the beneficiary, not the extract-er
+ *   2. Primary trigger-word regex (to/for/passenger/required by/requested by)
+ *      — filtering non-clan staff as intermediaries
+ *   3. Clan-surname scan — "First [Middle] Marika|Yunupingu|..." anywhere
+ *      in the description
+ * Returns null if none of the three produce a valid name.
  */
 function extractRecipient(po) {
     const text = combinedDescription(po);
-    const match = text.match(RECIPIENT_REGEX);
-    if (!match) return null;
-    let name = match[1].trim();
 
-    // Filter exact-match non-person denylist.
-    if (NON_PERSON_NAMES.has(name)) return null;
+    // Priority 1: "on behalf of X" — the real beneficiary
+    const behalfMatch = text.match(ON_BEHALF_OF_REGEX);
+    if (behalfMatch) {
+        const name = behalfMatch[1].trim();
+        if (!isDenylistedName(name)) {
+            return normalizeRecipientName(name);
+        }
+    }
 
-    // Filter out names where the first word is a known place.
-    const firstWord = name.split(' ')[0];
-    if (PLACE_FIRST_WORDS.has(firstWord)) return null;
+    // Priority 2: Primary regex, filtered for non-clan staff intermediaries
+    const primaryMatch = text.match(RECIPIENT_REGEX);
+    if (primaryMatch) {
+        const name = primaryMatch[1].trim();
+        if (!isDenylistedName(name)) {
+            return normalizeRecipientName(name);
+        }
+        // If primary matched a staff name, fall through to clan-surname scan
+        // — there may be a real clan beneficiary elsewhere in the description.
+    }
 
-    // Canonicalise "and family" casing.
-    name = normalizeRecipientName(name);
+    // Priority 3: Clan-surname fallback scan
+    const clanMatch = scanForClanSurname(text);
+    if (clanMatch) {
+        return normalizeRecipientName(clanMatch);
+    }
 
-    return name;
+    return null;
 }
 
 /**
  * Check if a PO looks like internal corporate spend rather than welfare.
- * Checks both supplier name and description text against their respective
- * pattern lists.
  */
 function isInternalCorporate(po) {
     const supplier = po.contact || '';
@@ -233,8 +327,7 @@ function isInternalCorporate(po) {
 }
 
 /**
- * Determine the dominant Xero account code on a PO by summing line-item amounts.
- * Returns { accountCode, account, totalOnThisCode }.
+ * Determine the dominant Xero account code on a PO.
  */
 function dominantAccountCode(po) {
     const totals = {};
@@ -254,21 +347,17 @@ function dominantAccountCode(po) {
 
 /**
  * Classify a single PO into an AR welfare category.
- * Returns { category, confidence, reason } or { excluded: '...' } if should
- * not contribute to welfare totals.
  *
- * confidence: 'high' | 'medium' | 'low' — high when supplier + account code agree,
- * medium when only one strong signal, low when category inferred weakly.
- *
- * Rule order (most specific to least):
+ * Rule order:
  *   1. Status-based exclusions (draft/cancelled/rejected)
  *   2. Internal corporate exclusion (supplier- or description-based)
  *   3. Supplier + account combos                ← high confidence
  *   4. Supplier-name hints                      ← high confidence
  *   5. Account-code family hints (e.g. 250xx)   ← high confidence
  *   6. Account-code specific (64605, 63950)     ← medium/low confidence
- *   7. Recipient-fallback                       ← medium confidence
- *   8. Uncategorised
+ *   7. Description keyword hints (ceremonial)   ← medium confidence
+ *   8. Recipient-fallback                       ← medium confidence
+ *   9. Uncategorised
  */
 function classifyPO(po) {
     // Step 1: Exclude non-final statuses.
@@ -297,8 +386,6 @@ function classifyPO(po) {
     }
 
     // Step 4: Supplier-name hints.
-    // Fires before account-code hints so known transport/funeral/medical
-    // suppliers route to their specific AR line even if coded to 250xx.
     for (const hint of SUPPLIER_CATEGORY_HINTS) {
         if (hint.pattern.test(supplier)) {
             return {
@@ -309,7 +396,7 @@ function classifyPO(po) {
         }
     }
 
-    // Step 5: Account-code family hints (e.g. any supplier + 250xx → charitable).
+    // Step 5: Account-code family hints.
     for (const hint of ACCOUNT_CODE_CATEGORY_HINTS) {
         if (accountCode && hint.pattern.test(accountCode)) {
             return {
@@ -321,7 +408,6 @@ function classifyPO(po) {
     }
 
     // Step 6: Account-code specific inference.
-    // 64605 Travel → Transport Assistance (medium).
     if (accountCode === '64605') {
         return {
             category: 'Transport Assistance',
@@ -330,9 +416,6 @@ function classifyPO(po) {
         };
     }
 
-    // 63950 Meeting Expenses:
-    //   + recipient → Family Charitable Payments (medium)
-    //   - recipient → Social & Cultural Programs (low, assumed catering)
     if (accountCode === '63950') {
         const recipient = extractRecipient(po);
         if (recipient) {
@@ -349,10 +432,19 @@ function classifyPO(po) {
         };
     }
 
-    // Step 7: Recipient-name fallback.
-    // If we can extract a named recipient and the spend isn't internal, treat
-    // as Family Charitable with medium confidence. Catches long-tail "goods/
-    // fuel/tent to [Name]" descriptions on account codes not covered above.
+    // Step 7: Description keyword hints (e.g. ceremonial → Culture & Ceremony).
+    const descriptionText = combinedDescription(po);
+    for (const hint of DESCRIPTION_CATEGORY_HINTS) {
+        if (hint.pattern.test(descriptionText)) {
+            return {
+                category: hint.category,
+                confidence: hint.confidence,
+                reason: hint.reason
+            };
+        }
+    }
+
+    // Step 8: Recipient-name fallback.
     const fallbackRecipient = extractRecipient(po);
     if (fallbackRecipient) {
         return {
@@ -362,7 +454,7 @@ function classifyPO(po) {
         };
     }
 
-    // Step 8: Unmatched. Return as uncategorised so we can inspect and tune.
+    // Step 9: Unmatched. Return as uncategorised so we can inspect and tune.
     return {
         category: 'Uncategorised',
         confidence: 'none',
@@ -374,25 +466,16 @@ function classifyPO(po) {
 // Main entry point
 // -----------------------------------------------------------------------------
 
-/**
- * Main entry point. Given an array of raw Aboriginal Corp POs from AM,
- * returns the dashboard-shaped welfare summary payload.
- *
- * @param {Array} pos - Array of PO objects from AM API
- * @param {Object} opts - { fyStart: 'YYYY-MM-DD', asOfDate: 'YYYY-MM-DD', fyLabel: 'FY26' }
- */
 function buildWelfareSummary(pos, opts = {}) {
     const fyStart = opts.fyStart || '2025-07-01';
     const asOfDate = opts.asOfDate || new Date().toISOString().slice(0, 10);
     const fyLabel = opts.fyLabel || 'FY26';
 
-    // Financial year pace: what fraction of the 12-month year has elapsed?
     const fyStartDate = new Date(fyStart);
     const asOfDateObj = new Date(asOfDate);
     const daysElapsed = Math.floor((asOfDateObj - fyStartDate) / (1000 * 60 * 60 * 24));
     const fyPaceFraction = Math.max(0, Math.min(1, daysElapsed / 365));
 
-    // Initialise category buckets.
     const categories = {};
     for (const [cat, baseline] of Object.entries(FY25_AR_BASELINES)) {
         categories[cat] = {
@@ -406,7 +489,6 @@ function buildWelfareSummary(pos, opts = {}) {
             recipientTotals: {}
         };
     }
-    // Also an Uncategorised bucket so we can see what we're missing.
     categories['Uncategorised'] = {
         arLine: 'Uncategorised',
         fy25Baseline: null,
@@ -416,12 +498,11 @@ function buildWelfareSummary(pos, opts = {}) {
         uniqueRecipients: new Set(),
         suppliers: {},
         recipientTotals: {},
-        sampleDescriptions: []  // for debugging / tuning
+        sampleDescriptions: []
     };
 
     const excluded = { draft: 0, cancelled: 0, rejected: 0, internal_corporate: 0 };
 
-    // Classify each PO.
     for (const po of pos) {
         const result = classifyPO(po);
 
@@ -460,7 +541,6 @@ function buildWelfareSummary(pos, opts = {}) {
         }
     }
 
-    // Finalise buckets: convert Sets to counts, extract top N suppliers/recipients.
     const finalCategories = Object.values(categories).map(bucket => {
         const topSuppliers = Object.entries(bucket.suppliers)
             .sort((a, b) => b[1] - a[1])
@@ -483,12 +563,9 @@ function buildWelfareSummary(pos, opts = {}) {
             topRecipients
         };
 
-        // AR-insight metrics - the subtle layer Duane described.
         if (bucket.fy25Baseline) {
             out.ytdPercentOfBaseline = round1((bucket.ytdTotal / bucket.fy25Baseline) * 100);
-            // Pace-adjusted: if we're 42% through FY26, are we on track for $360K?
-            // ytdTotal / fyPaceFraction = extrapolated full-year spend.
-            const projectedFullYear = fyPaceFraction > 0.05  // avoid divide-by-tiny-fraction noise early in FY
+            const projectedFullYear = fyPaceFraction > 0.05
                 ? bucket.ytdTotal / fyPaceFraction
                 : null;
             out.projectedFullYear = projectedFullYear ? round2(projectedFullYear) : null;
@@ -497,7 +574,6 @@ function buildWelfareSummary(pos, opts = {}) {
                 : null;
         }
 
-        // Include sample descriptions only for the Uncategorised bucket.
         if (bucket.sampleDescriptions) {
             out.sampleDescriptions = bucket.sampleDescriptions;
         }
@@ -505,7 +581,6 @@ function buildWelfareSummary(pos, opts = {}) {
         return out;
     });
 
-    // Sort: AR-matching categories first (by baseline desc), Uncategorised last.
     finalCategories.sort((a, b) => {
         if (a.arLine === 'Uncategorised') return 1;
         if (b.arLine === 'Uncategorised') return -1;
@@ -538,13 +613,14 @@ function buildWelfareSummary(pos, opts = {}) {
         methodology: {
             note: 'Heuristic classifier. Confidence levels per category indicate signal strength. Uncategorised bucket contains unmatched POs for tuning. See SAMPLING_FINDINGS.md §3-4 for rules.',
             rules: [
-                'Internal corporate exclusion: NT vehicle regos, office/boardroom/staff-meeting keywords, "pick up by RAC"; intercompany Rirratjingu suppliers; printing/signage/IT vendors',
+                'Internal corporate exclusion: vehicle regos, office keywords, "pick up by RAC"; intercompany Rirratjingu suppliers; printing/signage/IT/stationery vendors',
                 'Supplier + account combo (high): BP + 63415 → Family Charitable; Gove Warehouse + 64480 → Whitegoods',
-                'Supplier name hint (high): Gove Transport/taxi → Transport; Air Frontier/Black Diamond/MAF/HM Air → Transport; funeral/memorial → Family Funeral Support; medical/chemist → Medical; Harvey Norman/The Good Guys → Whitegoods',
-                'Account code family (high): 250xx → Family Charitable Payments (member voucher, supplier-agnostic — fires after supplier hints so aviation/funeral/medical win)',
-                'Account code 64605 Travel → Transport Assistance (medium)',
-                'Account 63950 + recipient → Family Charitable (medium); without recipient → Social & Cultural (low)',
-                'Recipient-fallback: any extractable "to/for/passenger/required by/requested by [Name]" → Family Charitable (medium)',
+                'Supplier name hint (high): Gove Transport/taxi, Air Frontier/Black Diamond/MAF/HM Air → Transport; funeral/memorial → Family Funeral; medical/chemist → Medical; Harvey Norman → Whitegoods; Buku Larrngay Mulka → Culture & Ceremony',
+                'Account code family (high): 250xx → Family Charitable (member voucher, supplier-agnostic)',
+                'Account code 64605 Travel → Transport; 63950 + recipient → Family Charitable; 63950 no recipient → Social & Cultural',
+                'Description keyword (medium): "ceremonial/ceremony/buŋgul" → Culture & Ceremony Support',
+                'Recipient extraction: tiered — "on behalf of X" (priority 1), to/for/required by/requested by [Name] (priority 2, filtering non-clan staff), clan-surname scan Marika/Yunupingu/Garrawurra/... (priority 3)',
+                'Recipient-fallback: any extractable recipient → Family Charitable (medium)',
                 'Everything else: Uncategorised — inspect sampleDescriptions to tune rules'
             ]
         }
