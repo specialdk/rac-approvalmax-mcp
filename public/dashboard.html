@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAC Procurement — ApprovalMax Dashboard (frame v1)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+    --ink: #141a2a;
+    --ink-soft: #2a3248;
+    --ink-mute: #5b6178;
+    --ink-faint: #8b90a3;
+    --paper: #f7f4ed;
+    --paper-2: #efeadf;
+    --card: #ffffff;
+    --line: #e0dcd1;
+    --line-2: #c9c4b5;
+    --terra: #a23e2c;
+    --terra-soft: #c96b55;
+    --terra-pale: #f3e3dc;
+    --ochre: #b88628;
+    --ochre-pale: #f4e8c9;
+    --moss: #4a6741;
+    --moss-pale: #e1e8d8;
+    --alert: #a23e2c;
+    --warn: #b88628;
+    --ok: #4a6741;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 300;
+    color: var(--ink);
+    background: var(--paper);
+    line-height: 1.5;
+    font-size: 14px;
+    min-height: 100vh;
+}
+code, .mono { font-family: 'IBM Plex Mono', monospace; }
+.serif, h1, h2, h3 { font-family: 'IBM Plex Serif', serif; font-weight: 400; color: var(--ink); }
+
+.masthead { background: var(--ink); color: var(--paper); border-bottom: 4px solid var(--terra); }
+.masthead-inner { max-width: 1400px; margin: 0 auto; padding: 18px 32px 0; display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; }
+.mast-title { font-family: 'IBM Plex Serif', serif; font-weight: 400; font-size: 28px; letter-spacing: 0.5px; line-height: 1; color: var(--paper); }
+.mast-subtitle { font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 2.5px; color: var(--paper-2); opacity: 0.6; margin-top: 4px; }
+.mast-meta { font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; text-align: right; color: var(--paper-2); opacity: 0.8; line-height: 1.8; }
+.mast-meta .trial-clock { color: var(--ochre-pale); font-weight: 500; }
+.mast-meta .trial-urgent { color: var(--terra-soft); }
+
+.entity-strip { background: var(--ink); max-width: 1400px; margin: 0 auto; padding: 0 32px; display: flex; gap: 0; overflow-x: auto; }
+.entity-tab { background: transparent; border: none; color: var(--paper-2); font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; font-weight: 400; padding: 14px 20px 16px; cursor: pointer; position: relative; transition: color 0.12s; white-space: nowrap; opacity: 0.55; }
+.entity-tab:hover { opacity: 0.9; }
+.entity-tab.active { opacity: 1; color: var(--paper); }
+.entity-tab.active::after { content: ''; position: absolute; bottom: -4px; left: 20px; right: 20px; height: 4px; background: var(--terra); }
+.entity-tab .tab-meta { display: block; font-family: 'IBM Plex Mono', monospace; font-size: 10px; margin-top: 2px; opacity: 0.5; letter-spacing: 1px; }
+
+/* Preview banner */
+.preview-banner { background: var(--ochre); color: var(--ink); padding: 6px 32px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 2px; text-align: center; }
+.preview-banner a { color: var(--ink); text-decoration: underline; }
+
+.shell { max-width: 1400px; margin: 0 auto; padding: 32px; }
+
+.kpi-strip { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); margin-bottom: 20px; }
+.kpi { background: var(--paper); padding: 18px 20px; }
+.kpi-label { font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--ink-mute); margin-bottom: 6px; }
+.kpi-value { font-family: 'IBM Plex Serif', serif; font-size: 26px; font-weight: 400; color: var(--ink); line-height: 1.1; }
+.kpi-sub { font-size: 11px; color: var(--ink-faint); margin-top: 4px; }
+.kpi-value.alert { color: var(--terra); }
+.kpi-value.warn { color: var(--ochre); }
+
+.section-head { border-top: 2px solid var(--ink); padding-top: 14px; margin: 32px 0 16px; display: flex; align-items: baseline; justify-content: space-between; }
+.section-head h2 { font-size: 22px; letter-spacing: 0.3px; }
+.section-head .section-kicker { font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 2px; color: var(--terra); }
+.section-head .section-aside { font-size: 12px; color: var(--ink-mute); font-style: italic; }
+
+/* Governance — collapsible */
+.gov-toggle-row { margin-bottom: 24px; }
+.gov-toggle { background: transparent; border: 1px solid var(--line-2); color: var(--ink-mute); padding: 10px 16px; cursor: pointer; font-family: 'IBM Plex Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; width: 100%; text-align: left; transition: background 0.15s, color 0.15s; display: flex; justify-content: space-between; align-items: center; }
+.gov-toggle:hover { background: var(--paper-2); color: var(--ink); }
+.gov-toggle .gov-toggle-right { font-weight: 400; opacity: 0.8; }
+.gov-strip { background: var(--terra-pale); border-left: 4px solid var(--terra); padding: 16px 20px; display: grid; grid-template-columns: 1fr 2fr; gap: 24px; align-items: center; margin-top: 8px; }
+.gov-strip.hidden { display: none; }
+.gov-title { font-family: 'IBM Plex Serif', serif; font-size: 15px; font-weight: 500; color: var(--terra); margin-bottom: 4px; }
+.gov-body { font-size: 13px; color: var(--ink-soft); line-height: 1.6; }
+.gov-body em { color: var(--ink-mute); font-style: italic; }
+.gov-metrics { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+.gov-metric { text-align: center; background: var(--paper); padding: 8px 10px; border: 1px solid var(--line); }
+.gov-metric-name { font-family: 'IBM Plex Mono', monospace; font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--ink-mute); margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gov-metric-val { font-family: 'IBM Plex Serif', serif; font-size: 17px; color: var(--ink); }
+.gov-metric-pct { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--terra); margin-top: 2px; }
+
+.entity-panel { display: none; }
+.entity-panel.active { display: block; }
+
+.panel-hero { background: var(--card); border: 1px solid var(--line); border-top: 4px solid var(--terra); padding: 24px 28px; margin-bottom: 24px; display: grid; grid-template-columns: 2fr 1fr; gap: 32px; }
+.panel-kicker { font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 2.5px; color: var(--terra); margin-bottom: 6px; }
+.panel-title { font-family: 'IBM Plex Serif', serif; font-size: 28px; font-weight: 400; margin-bottom: 8px; line-height: 1.2; }
+.panel-standfirst { font-family: 'IBM Plex Serif', serif; font-size: 15px; font-style: italic; color: var(--ink-soft); line-height: 1.6; max-width: 58ch; }
+.panel-quickstats { border-left: 1px solid var(--line-2); padding-left: 24px; display: flex; flex-direction: column; justify-content: center; gap: 12px; }
+.quickstat-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; padding-bottom: 8px; border-bottom: 1px dotted var(--line); }
+.quickstat-row:last-child { border-bottom: none; padding-bottom: 0; }
+.quickstat-label { font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--ink-mute); }
+.quickstat-val { font-family: 'IBM Plex Serif', serif; font-size: 16px; }
+
+.content-grid { display: grid; grid-template-columns: 3fr 2fr; gap: 24px; margin-bottom: 24px; }
+.content-grid-full { grid-template-columns: 1fr; }
+.content-grid-3col { grid-template-columns: 1fr 1fr 1fr; }
+
+.card { background: var(--card); border: 1px solid var(--line); padding: 22px 24px; }
+.card-head { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 14px; }
+.card-title { font-family: 'IBM Plex Serif', serif; font-size: 16px; font-weight: 500; }
+.card-meta { font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--ink-mute); }
+
+.data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.data-table th { font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--ink-mute); font-weight: 400; text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.data-table th.num { text-align: right; }
+.data-table td { padding: 9px 8px; border-bottom: 1px dotted var(--line); vertical-align: top; }
+.data-table td.num { text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
+.data-table td.mono-small { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--ink-mute); }
+.data-table tr:last-child td { border-bottom: none; }
+.data-table .supplier-name { font-weight: 400; }
+.data-table .account-desc { font-size: 11px; color: var(--ink-mute); }
+.data-table .family-row td:first-child { font-family: 'IBM Plex Serif', serif; font-weight: 500; font-size: 14px; }
+
+.welfare-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); }
+.welfare-card { background: var(--paper); padding: 16px 18px; min-height: 120px; display: flex; flex-direction: column; justify-content: space-between; }
+.welfare-card-name { font-family: 'IBM Plex Serif', serif; font-size: 14px; font-weight: 500; color: var(--ink); margin-bottom: 6px; line-height: 1.3; }
+.welfare-card-ytd { font-family: 'IBM Plex Serif', serif; font-size: 22px; color: var(--ink); line-height: 1; }
+.welfare-card-baseline { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--ink-mute); margin-top: 4px; }
+.welfare-bar { height: 3px; background: var(--line); margin-top: 10px; position: relative; overflow: hidden; }
+.welfare-bar-fill { height: 100%; background: var(--terra); }
+.welfare-bar.under .welfare-bar-fill { background: var(--ochre); }
+.welfare-bar.over .welfare-bar-fill { background: var(--terra); }
+.welfare-bar.on .welfare-bar-fill { background: var(--moss); }
+.welfare-card-meta { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--ink-mute); margin-top: 6px; display: flex; justify-content: space-between; }
+
+.conc-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; margin-bottom: 10px; }
+.conc-label { font-size: 13px; }
+.conc-label .sub { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--ink-mute); margin-left: 6px; }
+.conc-val { font-family: 'IBM Plex Mono', monospace; font-size: 12px; text-align: right; white-space: nowrap; }
+.conc-bar { grid-column: 1 / -1; height: 6px; background: var(--paper-2); margin-top: 2px; margin-bottom: 4px; }
+.conc-bar-fill { height: 100%; background: var(--ink); }
+
+.overview-entities { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 24px; }
+.overview-entity-card { background: var(--card); border: 1px solid var(--line); border-top: 3px solid var(--ink-mute); padding: 16px; cursor: pointer; transition: border-color 0.15s, transform 0.15s; }
+.overview-entity-card:hover { border-top-color: var(--terra); }
+.overview-entity-card .oe-name { font-family: 'IBM Plex Serif', serif; font-size: 13px; line-height: 1.25; margin-bottom: 8px; min-height: 34px; }
+.overview-entity-card .oe-val { font-family: 'IBM Plex Serif', serif; font-size: 20px; color: var(--ink); }
+.overview-entity-card .oe-sub { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--ink-mute); margin-top: 2px; }
+.overview-entity-card .oe-story { font-size: 11px; color: var(--ink-soft); font-style: italic; margin-top: 10px; padding-top: 10px; border-top: 1px dotted var(--line); line-height: 1.4; }
+.overview-entity-card.dominant { border-top-color: var(--terra); }
+
+.callout { background: var(--ochre-pale); border-left: 4px solid var(--ochre); padding: 14px 18px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+.callout-title { font-weight: 500; color: var(--ink-soft); }
+.callout-body { color: var(--ink-mute); font-style: italic; }
+
+.todo { background: transparent; border: 1px dashed var(--line-2); padding: 14px 18px; font-size: 12px; color: var(--ink-mute); font-style: italic; margin: 12px 0; }
+.todo strong { font-family: 'IBM Plex Mono', monospace; text-transform: uppercase; letter-spacing: 1.5px; font-size: 10px; font-style: normal; color: var(--terra); margin-right: 8px; }
+
+.footer { max-width: 1400px; margin: 48px auto 0; padding: 24px 32px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--ink-mute); }
+
+@media (max-width: 1100px) {
+    .kpi-strip { grid-template-columns: repeat(3, 1fr); }
+    .content-grid, .content-grid-3col { grid-template-columns: 1fr; }
+    .overview-entities { grid-template-columns: repeat(2, 1fr); }
+    .welfare-grid { grid-template-columns: repeat(2, 1fr); }
+    .panel-hero { grid-template-columns: 1fr; }
+    .panel-quickstats { border-left: none; border-top: 1px solid var(--line-2); padding-left: 0; padding-top: 16px; }
+    .gov-strip { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="masthead">
+    <div class="masthead-inner">
+        <div>
+            <div class="mast-title">Rirratjingu Procurement</div>
+            <div class="mast-subtitle">ApprovalMax · cross-entity dashboard · frame v1</div>
+        </div>
+        <div class="mast-meta">
+            <div>As at <span class="mono">23 Apr 2026</span></div>
+            <div>FY26 day <span class="mono">296 / 365</span> · <span class="mono">81%</span> elapsed</div>
+            <div class="trial-clock trial-urgent">AM Premium trial · <span class="mono">12 days remaining</span></div>
+        </div>
+    </div>
+    <div class="entity-strip" id="entityStrip">
+        <button class="entity-tab active" data-entity="all">All entities<span class="tab-meta">5 ORGS · 4,178 POs</span></button>
+        <button class="entity-tab" data-entity="aborig">Aboriginal Corporation<span class="tab-meta">3,000+ POs · $1.35M</span></button>
+        <button class="entity-tab" data-entity="enterprises">Enterprises<span class="tab-meta">450 POs · $3.3M</span></button>
+        <button class="entity-tab" data-entity="rpmms">Property Mgmt<span class="tab-meta">416 POs · $450K</span></button>
+        <button class="entity-tab" data-entity="mining">Mining<span class="tab-meta">257 POs · $1.14M</span></button>
+        <button class="entity-tab" data-entity="invest">Investments (Miliditjpi)<span class="tab-meta">55 POs · $352K</span></button>
+    </div>
+</div>
+<div class="preview-banner">Frame v1 · Snapshot data from 23 Apr 2026 · Live API wiring is the next step</div>
+
+<div class="shell">
+
+    <div class="kpi-strip">
+        <div class="kpi"><div class="kpi-label">Committed FY26</div><div class="kpi-value">$6.60M</div><div class="kpi-sub">across 5 entities, post-AM era</div></div>
+        <div class="kpi"><div class="kpi-label">Total POs</div><div class="kpi-value">4,178</div><div class="kpi-sub">since 1 Jun 2025 (AM cutoff)</div></div>
+        <div class="kpi"><div class="kpi-label">Approved</div><div class="kpi-value">3,760</div><div class="kpi-sub">90% of total</div></div>
+        <div class="kpi"><div class="kpi-label">Pending (draft / on-approval)</div><div class="kpi-value warn">369</div><div class="kpi-sub">8.8% — needs review</div></div>
+        <div class="kpi"><div class="kpi-label">Rejected / Cancelled</div><div class="kpi-value alert">49</div><div class="kpi-sub">see governance detail</div></div>
+        <div class="kpi"><div class="kpi-label">Entities live in AM</div><div class="kpi-value">5 of 7</div><div class="kpi-sub">Ngarrkuwuy &amp; Marrin Sq. outside</div></div>
+    </div>
+
+    <!-- Collapsible governance -->
+    <div class="gov-toggle-row">
+        <button class="gov-toggle" id="govToggle">
+            <span><span id="govChevron">▸</span>&nbsp;&nbsp;Governance &amp; draft-rate detail</span>
+            <span class="gov-toggle-right">369 pending · 49 rejected/cancelled · click to expand</span>
+        </button>
+        <div class="gov-strip hidden" id="govStrip">
+            <div>
+                <div class="gov-title">Draft / rejected / cancelled — split by AM-era vs legacy?</div>
+                <div class="gov-body">
+                    367 drafts and 49 rejected/cancelled POs represent effort that didn't result in approval. Question for Matt/Rhian: <em>were these raised after ApprovalMax went live, or are they legacy records backfilled during AM setup?</em> Post-AM rejections are governance signals worth action; pre-AM rejections are noise. Needs an "AM commissioning date" per entity to split correctly.
+                </div>
+            </div>
+            <div class="gov-metrics">
+                <div class="gov-metric"><div class="gov-metric-name">Aborig. Corp</div><div class="gov-metric-val">136</div><div class="gov-metric-pct">4.5% draft</div></div>
+                <div class="gov-metric"><div class="gov-metric-name">Enterprises</div><div class="gov-metric-val">103</div><div class="gov-metric-pct">23% draft</div></div>
+                <div class="gov-metric"><div class="gov-metric-name">Property Mgmt</div><div class="gov-metric-val">67</div><div class="gov-metric-pct">16% draft</div></div>
+                <div class="gov-metric"><div class="gov-metric-name">Mining</div><div class="gov-metric-val">40</div><div class="gov-metric-pct">16% draft</div></div>
+                <div class="gov-metric"><div class="gov-metric-name">Investments</div><div class="gov-metric-val">21</div><div class="gov-metric-pct">38% draft</div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ALL ENTITIES -->
+    <div class="entity-panel active" id="panel-all">
+        <div class="section-head"><h2>Cross-entity overview</h2><div class="section-kicker">Reporting period · Jun 2025 – Apr 2026</div></div>
+        <div class="overview-entities">
+            <div class="overview-entity-card dominant" onclick="setEntity('aborig')"><div class="oe-name">Aboriginal Corporation</div><div class="oe-val">$1.35M</div><div class="oe-sub">3,000+ POs · 133 suppliers</div><div class="oe-story">Welfare, funerals, culture &amp; ceremony. Story: wide benefit distribution to clan members.</div></div>
+            <div class="overview-entity-card dominant" onclick="setEntity('enterprises')"><div class="oe-name">Enterprises</div><div class="oe-val">$3.30M</div><div class="oe-sub">450 POs · 63 suppliers</div><div class="oe-story">Pond 5 rehab, hydromulch, contractor-led. Story: high-value project portfolio.</div></div>
+            <div class="overview-entity-card" onclick="setEntity('rpmms')"><div class="oe-name">Property Management &amp; Maintenance</div><div class="oe-val">$450K</div><div class="oe-sub">416 POs · 43 suppliers</div><div class="oe-story">Materials, tools, vehicles. Story: 1,350 maintenance jobs at AR pace.</div></div>
+            <div class="overview-entity-card dominant" onclick="setEntity('mining')"><div class="oe-name">Mining</div><div class="oe-val">$1.14M</div><div class="oe-sub">257 POs · 56 suppliers</div><div class="oe-story">Fuel and plant repairs. Story: intercompany fuel supply dominates.</div></div>
+            <div class="overview-entity-card" onclick="setEntity('invest')"><div class="oe-name">Investments / Miliditjpi Trust</div><div class="oe-val">$352K</div><div class="oe-sub">55 POs · 22 suppliers</div><div class="oe-story">Yanawal Units, Wallaby Beach. Story: episodic capital works.</div></div>
+        </div>
+        <div class="content-grid">
+            <div class="card">
+                <div class="card-head"><div class="card-title">Top suppliers across the corporation</div><div class="card-meta">by value · top 10</div></div>
+                <table class="data-table">
+                    <thead><tr><th>Supplier</th><th>Entity</th><th class="num">POs</th><th class="num">Value</th></tr></thead>
+                    <tbody>
+                        <tr><td class="supplier-name">Gracie Contracting</td><td class="mono-small">Enterprises</td><td class="num">10</td><td class="num">$1,740,985</td></tr>
+                        <tr><td class="supplier-name">Rirratjingu Fuel</td><td class="mono-small">Mining</td><td class="num">14</td><td class="num">$392,951</td></tr>
+                        <tr><td class="supplier-name">"Unknown"</td><td class="mono-small">Mining + Ent.</td><td class="num">104</td><td class="num">$596,417</td></tr>
+                        <tr><td class="supplier-name">Hines Contracting</td><td class="mono-small">Enterprises</td><td class="num">18</td><td class="num">$243,482</td></tr>
+                        <tr><td class="supplier-name">Raymond Davis</td><td class="mono-small">Enterprises</td><td class="num">14</td><td class="num">$193,875</td></tr>
+                        <tr><td class="supplier-name">Yirrkala Enterprises</td><td class="mono-small">Aborig. Corp</td><td class="num">1,197</td><td class="num">$159,989</td></tr>
+                        <tr><td class="supplier-name">Grenfell Build</td><td class="mono-small">Investments</td><td class="num">1</td><td class="num">$140,195</td></tr>
+                        <tr><td class="supplier-name">Black Cat Civil</td><td class="mono-small">Enterprises</td><td class="num">7</td><td class="num">$140,056</td></tr>
+                        <tr><td class="supplier-name">Gorrkbuy Industrial</td><td class="mono-small">Property Mgmt</td><td class="num">151</td><td class="num">$107,991</td></tr>
+                        <tr><td class="supplier-name">Rirratjingu Property Mgmt</td><td class="mono-small">intercompany</td><td class="num">44</td><td class="num">$259,062</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="card">
+                <div class="card-head"><div class="card-title">Spend concentration</div><div class="card-meta">dominant-supplier share</div></div>
+                <div class="conc-row"><div class="conc-label">Enterprises <span class="sub">Gracie Contracting</span></div><div class="conc-val">53% of spend</div></div>
+                <div class="conc-bar"><div class="conc-bar-fill" style="width: 53%"></div></div>
+                <div class="conc-row"><div class="conc-label">Mining <span class="sub">Rirratjingu Fuel</span></div><div class="conc-val">34% of spend</div></div>
+                <div class="conc-bar"><div class="conc-bar-fill" style="width: 34%"></div></div>
+                <div class="conc-row"><div class="conc-label">Investments <span class="sub">Grenfell Build</span></div><div class="conc-val">40% of spend</div></div>
+                <div class="conc-bar"><div class="conc-bar-fill" style="width: 40%"></div></div>
+                <div class="conc-row"><div class="conc-label">Property Mgmt <span class="sub">Gorrkbuy Industrial</span></div><div class="conc-val">24% of spend</div></div>
+                <div class="conc-bar"><div class="conc-bar-fill" style="width: 24%"></div></div>
+                <div class="conc-row"><div class="conc-label">Aboriginal Corp <span class="sub">Yirrkala Enterprises</span></div><div class="conc-val">12% of spend</div></div>
+                <div class="conc-bar"><div class="conc-bar-fill" style="width: 12%"></div></div>
+                <div class="todo" style="margin-top: 20px;"><strong>NOTE</strong> Concentration is a risk/efficiency signal. Enterprises' 53% single-supplier share reflects a major project commitment (Pond 5); different from Aboriginal Corp's long-tail retail pattern.</div>
+            </div>
+        </div>
+        <div class="callout">
+            <div>
+                <div class="callout-title">Intercompany flow detected</div>
+                <div class="callout-body">Rirratjingu Fuel → Mining ($393K), Property Mgmt → Aboriginal Corp ($84K), Property Mgmt → Investments ($89K). These wash out at group level but are visible as real supplier spend inside AM.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ABORIGINAL CORPORATION -->
+    <div class="entity-panel" id="panel-aborig">
+        <div class="panel-hero">
+            <div>
+                <div class="panel-kicker">Rirratjingu Aboriginal Corporation · member welfare</div>
+                <div class="panel-title">What we provided for our members this year</div>
+                <div class="panel-standfirst">
+                    Year-to-date, the Corporation has committed $524K across 2,441 welfare purchase orders benefitting 417 unique clan recipients. This view tracks the Annual Report narrative — family charitable, transport assistance, funerals, culture &amp; ceremony — in real time against FY25 baselines.
+                </div>
+            </div>
+            <div class="panel-quickstats">
+                <div class="quickstat-row"><span class="quickstat-label">Welfare YTD</span><span class="quickstat-val">$524K</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Clan recipients</span><span class="quickstat-val">417</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Welfare POs</span><span class="quickstat-val">2,441</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">FY25 baseline · total</span><span class="quickstat-val mono">$2.25M</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">vs FY25 at 81% pace</span><span class="quickstat-val" style="color: var(--ochre);">-28%</span></div>
+            </div>
+        </div>
+
+        <div class="section-head"><h2>Welfare categories — YTD vs FY25 baseline</h2><div class="section-kicker">Source: Annual Report p.14–15</div></div>
+        <div class="welfare-grid">
+            <div class="welfare-card"><div><div class="welfare-card-name">Family Charitable Payments</div><div class="welfare-card-ytd">$297K</div><div class="welfare-card-baseline">FY25 baseline · $1.40M</div></div><div><div class="welfare-bar under"><div class="welfare-bar-fill" style="width: 21%"></div></div><div class="welfare-card-meta"><span>1,935 POs</span><span>21% of FY25</span></div></div></div>
+            <div class="welfare-card"><div><div class="welfare-card-name">Transport Assistance</div><div class="welfare-card-ytd">$157K</div><div class="welfare-card-baseline">FY25 baseline · $360K</div></div><div><div class="welfare-bar under"><div class="welfare-bar-fill" style="width: 44%"></div></div><div class="welfare-card-meta"><span>374 POs</span><span>44% of FY25</span></div></div></div>
+            <div class="welfare-card"><div><div class="welfare-card-name">Family Funeral Support</div><div class="welfare-card-ytd" style="color: var(--terra);">$6K</div><div class="welfare-card-baseline">FY25 baseline · $206K</div></div><div><div class="welfare-bar over"><div class="welfare-bar-fill" style="width: 3%"></div></div><div class="welfare-card-meta"><span>3 POs · <em style="color: var(--terra);">undercounted</em></span><span>3% of FY25</span></div></div></div>
+            <div class="welfare-card"><div><div class="welfare-card-name">Culture &amp; Ceremony Support</div><div class="welfare-card-ytd">$27K</div><div class="welfare-card-baseline">FY25 baseline · $91K</div></div><div><div class="welfare-bar under"><div class="welfare-bar-fill" style="width: 30%"></div></div><div class="welfare-card-meta"><span>33 POs</span><span>30% of FY25</span></div></div></div>
+            <div class="welfare-card"><div><div class="welfare-card-name">Social &amp; Cultural Programs</div><div class="welfare-card-ytd">$34K</div><div class="welfare-card-baseline">FY25 baseline · $77K</div></div><div><div class="welfare-bar under"><div class="welfare-bar-fill" style="width: 44%"></div></div><div class="welfare-card-meta"><span>91 POs</span><span>44% of FY25</span></div></div></div>
+            <div class="welfare-card"><div><div class="welfare-card-name">Whitegoods · Medical · Education</div><div class="welfare-card-ytd">$3K</div><div class="welfare-card-baseline">FY25 baseline combined · $101K</div></div><div><div class="welfare-bar under"><div class="welfare-bar-fill" style="width: 3%"></div></div><div class="welfare-card-meta"><span>4 POs</span><span>long-tail</span></div></div></div>
+        </div>
+
+        <div class="todo" style="margin-top: 20px;">
+            <strong>FLAG</strong> Funeral category shows $6K YTD but account 63205 "Funeral Expenses" has $125K across 238 POs. Funeral-context spend is landing in other categories because the classifier matches supplier names rather than account codes. Next classifier iteration will route account 63205 → Family Funeral Support.
+        </div>
+
+        <div class="content-grid">
+            <div class="card">
+                <div class="card-head">
+                    <div class="card-title">Clan family distribution · Family Charitable</div>
+                    <div class="card-meta">417 unique recipients YTD</div>
+                </div>
+                <table class="data-table">
+                    <thead><tr><th>Clan family</th><th class="num">Recipients</th><th class="num">POs</th><th class="num">YTD total</th></tr></thead>
+                    <tbody>
+                        <tr class="family-row"><td>Marika</td><td class="num">~330</td><td class="num">~1,600</td><td class="num">~$240K</td></tr>
+                        <tr class="family-row"><td>Yunupingu</td><td class="num">~25</td><td class="num">~75</td><td class="num">~$15K</td></tr>
+                        <tr class="family-row"><td>Ulamari</td><td class="num">~15</td><td class="num">~60</td><td class="num">~$12K</td></tr>
+                        <tr class="family-row"><td>Rarrkminy</td><td class="num">~10</td><td class="num">~40</td><td class="num">~$9K</td></tr>
+                        <tr class="family-row"><td>Dhamarrandji</td><td class="num">~8</td><td class="num">~30</td><td class="num">~$8K</td></tr>
+                        <tr class="family-row"><td>Other Yolŋu families</td><td class="num">~30</td><td class="num">~130</td><td class="num">~$13K</td></tr>
+                    </tbody>
+                </table>
+                <div class="todo" style="margin-top: 14px;">
+                    <strong>ANONYMISED</strong> Dashboard shows spend aggregated to clan-family level, not individual recipients. Exact family totals will populate once the classifier's topFamilies rollup is wired through the live API. Individual-level detail is retained in the data for authorised finance users only.
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-head"><div class="card-title">Top welfare suppliers</div><div class="card-meta">by value</div></div>
+                <table class="data-table">
+                    <thead><tr><th>Supplier</th><th class="num">YTD</th></tr></thead>
+                    <tbody>
+                        <tr><td class="supplier-name">Yirrkala Enterprises <span class="account-desc">member voucher hub</span></td><td class="num">$134K</td></tr>
+                        <tr><td class="supplier-name">Air Frontier <span class="account-desc">aviation transport</span></td><td class="num">$70K</td></tr>
+                        <tr><td class="supplier-name">MAF International <span class="account-desc">charter flights</span></td><td class="num">$45K</td></tr>
+                        <tr><td class="supplier-name">BP Nhulunbuy <span class="account-desc">fuel voucher</span></td><td class="num">$38K</td></tr>
+                        <tr><td class="supplier-name">Elcho Group / Bottom Shop</td><td class="num">$24K</td></tr>
+                        <tr><td class="supplier-name">Buku Larrngay Mulka <span class="account-desc">ceremony &amp; art centre</span></td><td class="num">$16K</td></tr>
+                        <tr><td class="supplier-name">Gove Warehouse</td><td class="num">$15K</td></tr>
+                        <tr><td class="supplier-name">Black Diamond Aviation</td><td class="num">$12K</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ENTERPRISES -->
+    <div class="entity-panel" id="panel-enterprises">
+        <div class="panel-hero">
+            <div>
+                <div class="panel-kicker">Rirratjingu Enterprises · project portfolio</div>
+                <div class="panel-title">Where the major project dollars are going</div>
+                <div class="panel-standfirst">Enterprises is the largest single-entity spend across the corporation — $3.3M committed year-to-date, concentrated in the Pond 5 rehabilitation and hydromulch program. Only 10 POs account for more than half of Enterprises' total spend; this is a contract-led, high-value, low-volume portfolio.</div>
+            </div>
+            <div class="panel-quickstats">
+                <div class="quickstat-row"><span class="quickstat-label">Committed YTD</span><span class="quickstat-val">$3.30M</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Total POs</span><span class="quickstat-val">450</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Drafts pending</span><span class="quickstat-val" style="color: var(--terra);">103 (23%)</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Suppliers</span><span class="quickstat-val">63</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Top supplier share</span><span class="quickstat-val">53%</span></div>
+            </div>
+        </div>
+        <div class="content-grid">
+            <div class="card">
+                <div class="card-head"><div class="card-title">Top projects / contracts</div><div class="card-meta">by supplier · YTD value</div></div>
+                <table class="data-table">
+                    <thead><tr><th>Supplier</th><th class="num">POs</th><th class="num">Avg / PO</th><th class="num">Total</th></tr></thead>
+                    <tbody>
+                        <tr><td class="supplier-name">Gracie Contracting <span class="account-desc">Pond 5 rehab · hydromulch application</span></td><td class="num">10</td><td class="num">$174K</td><td class="num">$1,740,985</td></tr>
+                        <tr><td class="supplier-name">"Unknown" supplier <span class="account-desc">data-quality issue · 75 POs unlabelled</span></td><td class="num">75</td><td class="num">$4.2K</td><td class="num">$316,240</td></tr>
+                        <tr><td class="supplier-name">Hines Contracting</td><td class="num">18</td><td class="num">$13.5K</td><td class="num">$243,482</td></tr>
+                        <tr><td class="supplier-name">Raymond Davis <span class="account-desc">labour / contractor</span></td><td class="num">14</td><td class="num">$13.8K</td><td class="num">$193,875</td></tr>
+                        <tr><td class="supplier-name">Black Cat Civil</td><td class="num">7</td><td class="num">$20.0K</td><td class="num">$140,056</td></tr>
+                    </tbody>
+                </table>
+                <div class="todo" style="margin-top: 16px;"><strong>FLAG</strong> 75 POs with supplier "Unknown" totalling $316K — data quality issue upstream in Xero or AM. Needs investigation.</div>
+            </div>
+            <div class="card">
+                <div class="card-head"><div class="card-title">Spend by programme</div><div class="card-meta">by account code</div></div>
+                <table class="data-table">
+                    <thead><tr><th>Account</th><th class="num">POs</th><th class="num">Value</th></tr></thead>
+                    <tbody>
+                        <tr><td class="supplier-name">Hydromulch — Application <span class="account-desc">50035 · contractor labour</span></td><td class="num">11</td><td class="num">$1,169,060</td></tr>
+                        <tr><td class="supplier-name">Other Haulage <span class="account-desc">63050</span></td><td class="num">52</td><td class="num">$401,672</td></tr>
+                        <tr><td class="supplier-name">Hydromulch — Goods <span class="account-desc">50045 · materials</span></td><td class="num">5</td><td class="num">$380,384</td></tr>
+                        <tr><td class="supplier-name">Plant &amp; Equipment at cost <span class="account-desc">16500 · capitalised</span></td><td class="num">76</td><td class="num">$188,070</td></tr>
+                        <tr><td class="supplier-name">Hire of Plant &amp; Equipment <span class="account-desc">53770</span></td><td class="num">13</td><td class="num">$139,907</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- PROPERTY MGMT -->
+    <div class="entity-panel" id="panel-rpmms">
+        <div class="panel-hero">
+            <div>
+                <div class="panel-kicker">Rirratjingu Property Management &amp; Maintenance · operations</div>
+                <div class="panel-title">Maintenance jobs, materials and the fleet</div>
+                <div class="panel-standfirst">RPMMS ran 1,350 maintenance tasks across the community in FY25 per the Annual Report. The ApprovalMax footprint is narrower — 416 POs covering materials, tools, motor vehicles and staff training. Supplier base is diverse but Gorrkbuy Industrial Supplies dominates materials with 151 POs.</div>
+            </div>
+            <div class="panel-quickstats">
+                <div class="quickstat-row"><span class="quickstat-label">Committed YTD</span><span class="quickstat-val">$450K</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Total POs</span><span class="quickstat-val">416</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Drafts pending</span><span class="quickstat-val" style="color: var(--ochre);">67 (16%)</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Suppliers</span><span class="quickstat-val">43</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Account codes used</span><span class="quickstat-val">26</span></div>
+            </div>
+        </div>
+        <div class="content-grid">
+            <div class="card">
+                <div class="card-head"><div class="card-title">Materials &amp; tools — where the jobs go</div><div class="card-meta">by account code</div></div>
+                <table class="data-table">
+                    <thead><tr><th>Account</th><th class="num">POs</th><th class="num">Value</th></tr></thead>
+                    <tbody>
+                        <tr><td class="supplier-name">Cost — Materials <span class="account-desc">51050</span></td><td class="num">183</td><td class="num">$128,061</td></tr>
+                        <tr><td class="supplier-name">Materials &amp; Supplies <span class="account-desc">63930</span></td><td class="num">123</td><td class="num">$86,164</td></tr>
+                        <tr><td class="supplier-name">Motor Vehicle Expenses <span class="account-desc">64000 · fleet</span></td><td class="num">59</td><td class="num">$38,574</td></tr>
+                        <tr><td class="supplier-name">Tools <span class="account-desc">64595</span></td><td class="num">48</td><td class="num">$36,207</td></tr>
+                        <tr><td class="supplier-name">Staff — Training <span class="account-desc">64482</span></td><td class="num">28</td><td class="num">$33,181</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="card">
+                <div class="card-head"><div class="card-title">Key trade suppliers</div><div class="card-meta">by value</div></div>
+                <table class="data-table">
+                    <thead><tr><th>Supplier</th><th class="num">POs</th><th class="num">Total</th></tr></thead>
+                    <tbody>
+                        <tr><td class="supplier-name">Gorrkbuy Industrial Supplies <span class="account-desc">materials backbone</span></td><td class="num">151</td><td class="num">$107,991</td></tr>
+                        <tr><td class="supplier-name">Camping World · Darwin</td><td class="num">8</td><td class="num">$75,477</td></tr>
+                        <tr><td class="supplier-name">Gove Warehouse</td><td class="num">52</td><td class="num">$36,701</td></tr>
+                        <tr><td class="supplier-name">DABSCO</td><td class="num">17</td><td class="num">$32,962</td></tr>
+                        <tr><td class="supplier-name">Darkys Mechanical Services <span class="account-desc">fleet workshop</span></td><td class="num">29</td><td class="num">$31,599</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="todo"><strong>FUTURE</strong> When MEX asset-management data is joined in, this view can show cost-per-asset, maintenance-cycle-adherence, and link the 1,350-tasks narrative directly to AM PO approval.</div>
+    </div>
+
+    <!-- MINING -->
+    <div class="entity-panel" id="panel-mining">
+        <div class="panel-hero">
+            <div>
+                <div class="panel-kicker">Rirratjingu Mining · operations</div>
+                <div class="panel-title">Fuel, plant repairs and the quarry</div>
+                <div class="panel-standfirst">Mining's procurement is dominated by fuel ($393K from Rirratjingu Fuel, an intercompany supplier) and high-volume low-value plant repairs (221 POs for $92K). Two large one-off consultancies — SLR Consulting and Hastings Deering — round out the top suppliers. Operational, predictable, concentrated.</div>
+            </div>
+            <div class="panel-quickstats">
+                <div class="quickstat-row"><span class="quickstat-label">Committed YTD</span><span class="quickstat-val">$1.14M</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Total POs</span><span class="quickstat-val">257</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Drafts pending</span><span class="quickstat-val" style="color: var(--ochre);">40 (16%)</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Fuel share</span><span class="quickstat-val">34%</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Intercompany %</span><span class="quickstat-val">42%</span></div>
+            </div>
+        </div>
+        <div class="content-grid">
+            <div class="card">
+                <div class="card-head"><div class="card-title">Where the fuel and plant dollars go</div><div class="card-meta">by account code</div></div>
+                <table class="data-table">
+                    <thead><tr><th>Account</th><th class="num">POs</th><th class="num">Value</th></tr></thead>
+                    <tbody>
+                        <tr><td class="supplier-name">Cost — Fuel <span class="account-desc">51040</span></td><td class="num">12</td><td class="num">$363,200</td></tr>
+                        <tr><td class="supplier-name">Repairs — Plant &amp; Equipment <span class="account-desc">64284 · high-frequency low-value</span></td><td class="num">221</td><td class="num">$91,501</td></tr>
+                        <tr><td class="supplier-name">Waste Disposal <span class="account-desc">64710</span></td><td class="num">10</td><td class="num">$76,826</td></tr>
+                        <tr><td class="supplier-name">Consultancy Fees <span class="account-desc">63170</span></td><td class="num">11</td><td class="num">$39,540</td></tr>
+                        <tr><td class="supplier-name">Survey &amp; Volume Calculation <span class="account-desc">63550 · quarry</span></td><td class="num">8</td><td class="num">$28,966</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="card">
+                <div class="card-head"><div class="card-title">Top mining suppliers</div><div class="card-meta">by value</div></div>
+                <table class="data-table">
+                    <thead><tr><th>Supplier</th><th class="num">POs</th><th class="num">Total</th></tr></thead>
+                    <tbody>
+                        <tr><td class="supplier-name">Rirratjingu Fuel <span class="account-desc">intercompany fuel supplier</span></td><td class="num">14</td><td class="num">$392,951</td></tr>
+                        <tr><td class="supplier-name">"Unknown" supplier <span class="account-desc">data quality issue · 29 POs</span></td><td class="num">29</td><td class="num">$280,176</td></tr>
+                        <tr><td class="supplier-name">Rirratjingu Property Mgmt <span class="account-desc">intercompany</span></td><td class="num">3</td><td class="num">$86,647</td></tr>
+                        <tr><td class="supplier-name">SLR Consulting</td><td class="num">11</td><td class="num">$51,035</td></tr>
+                        <tr><td class="supplier-name">Hastings Deering <span class="account-desc">plant / heavy machinery</span></td><td class="num">34</td><td class="num">$50,428</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="todo"><strong>FUTURE</strong> When FleetComplete vehicle/fuel-burn data is joined, this view can reconcile fuel POs against actual truck litres — a real procurement-vs-consumption signal for the mining ops team.</div>
+    </div>
+
+    <!-- INVESTMENTS -->
+    <div class="entity-panel" id="panel-invest">
+        <div class="panel-hero">
+            <div>
+                <div class="panel-kicker">Rirratjingu Investments / Miliditjpi Trust · capital works</div>
+                <div class="panel-title">Property portfolio &amp; episodic capital projects</div>
+                <div class="panel-standfirst">The smallest entity by PO count (55) but meaningful by value ($352K). Single-shot big-ticket projects dominate — Grenfell Build's $140K contract and Yanawal Units accommodation improvements. Thirty-eight percent of POs are still in draft, the highest rate across all five entities; review appropriate.</div>
+            </div>
+            <div class="panel-quickstats">
+                <div class="quickstat-row"><span class="quickstat-label">Committed YTD</span><span class="quickstat-val">$352K</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Total POs</span><span class="quickstat-val">55</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Drafts pending</span><span class="quickstat-val" style="color: var(--terra);">21 (38%)</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Suppliers</span><span class="quickstat-val">22</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Biggest PO</span><span class="quickstat-val">$140K</span></div>
+            </div>
+        </div>
+        <div class="content-grid">
+            <div class="card">
+                <div class="card-head"><div class="card-title">Top capital-works accounts</div><div class="card-meta">property portfolio</div></div>
+                <table class="data-table">
+                    <thead><tr><th>Account</th><th class="num">POs</th><th class="num">Value</th></tr></thead>
+                    <tbody>
+                        <tr><td class="supplier-name">Yanawal Units Accommodation <span class="account-desc">17015 · capitalised improvements</span></td><td class="num">1</td><td class="num">$127,451</td></tr>
+                        <tr><td class="supplier-name">Wallaby Beach Workers Camp <span class="account-desc">14025</span></td><td class="num">32</td><td class="num">$76,887</td></tr>
+                        <tr><td class="supplier-name">Consultancy Fees <span class="account-desc">63170</span></td><td class="num">8</td><td class="num">$29,181</td></tr>
+                        <tr><td class="supplier-name">Business Centre Property Improvements <span class="account-desc">17010</span></td><td class="num">5</td><td class="num">$27,269</td></tr>
+                        <tr><td class="supplier-name">Plant &amp; Equipment at Cost <span class="account-desc">14011</span></td><td class="num">17</td><td class="num">$21,680</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="card">
+                <div class="card-head"><div class="card-title">Top suppliers · capital works</div><div class="card-meta">by value</div></div>
+                <table class="data-table">
+                    <thead><tr><th>Supplier</th><th class="num">POs</th><th class="num">Total</th></tr></thead>
+                    <tbody>
+                        <tr><td class="supplier-name">Grenfell Build <span class="account-desc">construction · one PO</span></td><td class="num">1</td><td class="num">$140,196</td></tr>
+                        <tr><td class="supplier-name">Rirratjingu Property Mgmt <span class="account-desc">intercompany maintenance</span></td><td class="num">8</td><td class="num">$88,734</td></tr>
+                        <tr><td class="supplier-name">High Performance Cleaning Solutions</td><td class="num">3</td><td class="num">$24,089</td></tr>
+                        <tr><td class="supplier-name">Australian Radio Network</td><td class="num">2</td><td class="num">$15,180</td></tr>
+                        <tr><td class="supplier-name">Schaper Concrete &amp; Construction</td><td class="num">1</td><td class="num">$12,738</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<div class="footer">
+    <div>Frame v1 · data as at 23 Apr 2026</div>
+    <div>RAC ApprovalMax · Rirratjingu Aboriginal Corporation</div>
+</div>
+
+<script>
+const tabs = document.querySelectorAll('.entity-tab');
+const panels = document.querySelectorAll('.entity-panel');
+
+function setEntity(key) {
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.entity === key));
+    panels.forEach(p => p.classList.toggle('active', p.id === 'panel-' + key));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+tabs.forEach(tab => tab.addEventListener('click', () => setEntity(tab.dataset.entity)));
+
+// Governance toggle
+const govToggle = document.getElementById('govToggle');
+const govStrip = document.getElementById('govStrip');
+const govChevron = document.getElementById('govChevron');
+govToggle.addEventListener('click', () => {
+    const isHidden = govStrip.classList.toggle('hidden');
+    govChevron.textContent = isHidden ? '▸' : '▾';
+});
+</script>
+
+</body>
+</html>
