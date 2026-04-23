@@ -6,6 +6,7 @@ const fetch = require('node-fetch');
 const { Pool } = require('pg');
 const amClient = require('./approvalmax-client');
 const welfare = require('./welfare-categoriser');
+const xeroProxy = require('./xero-proxy');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -334,6 +335,7 @@ async function requireToken() {
 // Middleware
 app.use(express.json());
 app.use(express.static('public'));
+app.use(xeroProxy);
 
 // ────────────────────────────────────────────────────────────────────────
 // Homepage
