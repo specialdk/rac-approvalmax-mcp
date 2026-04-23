@@ -414,6 +414,21 @@ app.get('/', (req, res) => {
                 </select>
             </div>
 
+            <div class="control-row">
+                <label for="limitPicker">Limit per page:</label>
+                <select id="limitPicker">
+                    <option value="3">3 (sampling)</option>
+                    <option value="5" selected>5 (sampling, default)</option>
+                    <option value="10">10</option>
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                    <option value="100">100 (AM max)</option>
+                </select>
+                <small style="width: 100%; color: #64748b; margin-top: 4px;">
+                    Small = easier to read one page of JSON when sampling. 100 = AM's maximum per request. Only affects "Fetch by type" — cross-entity summary paginates for true counts regardless.
+                </small>
+            </div>
+
             <h4>Actions</h4>
             <div class="button-grid">
                 <button onclick="callApi('/api/companies')" disabled id="btn-api-companies">GET /api/companies</button>
@@ -484,10 +499,12 @@ app.get('/', (req, res) => {
                 const [orderBy, orderDirection] = sortValue.split('|');
                 sortLabel = orderBy + ' ' + orderDirection;
             }
+            const limit = document.getElementById('limitPicker').value || '5';
             document.getElementById('filterSummary').innerHTML =
                 '<div class="filter-summary">Filters: status=<strong>' + status +
                 '</strong>, createdAtOrAfter=<strong>' + createdAtOrAfter +
-                '</strong>, sort=<strong>' + sortLabel + '</strong></div>';
+                '</strong>, sort=<strong>' + sortLabel +
+                '</strong>, limit/page=<strong>' + limit + '</strong></div>';
         }
 
         function renderCappedWarning(data) {
@@ -526,11 +543,12 @@ app.get('/', (req, res) => {
         function fetchXeroByType() {
             const type = document.getElementById('typePicker').value;
             const companyId = document.getElementById('companyPicker').value;
+            const limit = document.getElementById('limitPicker').value || '5';
             const filterParams = buildFilterParams();
             const basePath = companyId
                 ? '/api/xero/' + type + '/' + companyId
                 : '/api/xero/' + type;
-            const qs = 'limit=100' + (filterParams ? '&' + filterParams : '');
+            const qs = 'limit=' + encodeURIComponent(limit) + (filterParams ? '&' + filterParams : '');
             renderFilterSummary();
             callApi(basePath + '?' + qs);
         }
