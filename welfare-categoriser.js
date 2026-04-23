@@ -35,21 +35,10 @@ const FY25_AR_TOTAL = Object.values(FY25_AR_BASELINES).reduce((a, b) => a + b, 0
 // Rule sets (ordered by specificity — first match wins within each tier)
 // -----------------------------------------------------------------------------
 
-// High-confidence supplier + account code combinations.
-// These fire BEFORE the generic supplier-name hints because a supplier + account
-// pairing is a stronger signal than supplier name alone.
-// Observed in Day 3 sampling: Yirrkala Enterprises uses the 250xx code family
-// for member charitable vouchers (food/goods/mobile to named recipients),
-// BP Nhulunbuy uses 63415 for fuel-voucher charitable payments, and Gove
-// Warehouse uses 64480 for whitegoods.
+// High-confidence supplier + specific-account-code combinations.
+// These fire BEFORE the generic rules because a supplier + account pairing is
+// a stronger signal than either alone.
 const SUPPLIER_ACCOUNT_COMBOS = [
-    {
-        supplierPattern: /yirrkala enterprises/i,
-        accountCodes: ['25003', '25005', '25007', '25009'],
-        category: 'Family Charitable Payments',
-        confidence: 'high',
-        reason: 'Yirrkala Enterprises + 250xx account code → member voucher'
-    },
     {
         supplierPattern: /\bbp\b/i,
         accountCodes: ['63415'],
@@ -63,6 +52,25 @@ const SUPPLIER_ACCOUNT_COMBOS = [
         category: 'Whitegoods',
         confidence: 'high',
         reason: 'Gove Warehouse + 64480 → whitegoods/appliances'
+    }
+];
+
+// Account code family → category hints.
+// Fires after supplier+account combos (more specific) but before the generic
+// supplier-name hints. Useful when a code family consistently maps to one
+// welfare category regardless of supplier.
+//
+// Day 3 sampling: the 250xx code family (25002 through 25009 sighted across
+// samples) is RAC's chart-of-accounts family for member charitable vouchers.
+// Used across many suppliers — Yirrkala Enterprises, BP Nhulunbuy, Elcho Group
+// / Bottom Shop, Gove Warehouse, Arnhemland Progress, etc. — so a
+// supplier-agnostic rule on the code is cleaner than listing suppliers.
+const ACCOUNT_CODE_CATEGORY_HINTS = [
+    {
+        pattern: /^250\d{2}$/,
+        category: 'Family Charitable Payments',
+        confidence: 'high',
+        reason: 'account 250xx family → member charitable voucher'
     }
 ];
 
@@ -102,19 +110,20 @@ const INTERNAL_CORPORATE_PATTERNS = [
 //   "to First M Last"           → "First M Last"   (middle initial, with or without period)
 //   "to First Middle Last"      → "First Middle Last"
 //   "passenger: First Last"     → "First Last"
+//   "required by First Last"    → "First Last"    (Day 3 - added after second sampling)
 //   optional "... and Family" / "... & Family" suffix
 //
-// The middle-initial branch (`[A-Z]\.?`) was added Day 3 after sampling showed
-// many charitable PO descriptions use initials (e.g. "Jerome G Yunupingu",
-// "Janice M Marika"). The "passenger" prefix was added for charter-flight POs.
-// "[Tt]o" / "[Ff]or" / "[Pp]assenger" handles descriptions that begin with a
-// capital letter (start of sentence).
-const RECIPIENT_REGEX = /\b(?:[Tt]o|[Ff]or|[Pp]assenger)\b[:\s]+([A-Z][a-z]+(?:\s+(?:[A-Z]\.?|[A-Z][a-z]+))*\s+[A-Z][a-z]+(?:\s+(?:&|and)\s+[Ff]amily)?)/;
+// History:
+//   Day 2: base pattern matched "to/for [Name]" only.
+//   Day 3a: added middle-initial branch ([A-Z]\.?), "passenger:" prefix,
+//           case-insensitive "[Ff]amily" suffix.
+//   Day 3b: added "required by" prefix — dominant phrasing discovered after
+//           second sampling (6 of 10 uncategorised POs used this pattern).
+const RECIPIENT_REGEX = /\b(?:[Tt]o|[Ff]or|[Pp]assenger|[Rr]equired\s+[Bb]y)\b[:\s]+([A-Z][a-z]+(?:\s+(?:[A-Z]\.?|[A-Z][a-z]+))*\s+[A-Z][a-z]+(?:\s+(?:&|and)\s+[Ff]amily)?)/;
 
 // Strings that the regex may extract but which are not actual people.
-// These are places, supplier names, or generic nouns that happen to match the
-// "two capitalised words" pattern. Added Day 3 after inspecting top-recipients
-// output and seeing "Ski Beach", "Boat Club", "Air Frontier" etc.
+// These are places, supplier names, project names, or generic nouns that
+// happen to match the "two capitalised words" pattern.
 const NON_PERSON_NAMES = new Set([
     // Places / venues
     'Ski Beach', 'Boat Club', 'Gove Dhalinbuy', 'Yanawal Units',
@@ -124,14 +133,16 @@ const NON_PERSON_NAMES = new Set([
     'Gove Warehouse', 'Gove Transport', 'BP Nhulunbuy',
     'Peninsula Bakery', 'Kamayan Cafe', 'Territory Funerals',
     'Simplicity Funerals', 'Harvey Norman', 'Sodexo Remote',
-    'MAF International'
+    'MAF International',
+    // Project / event names (Day 3b)
+    'Country Music Video'
 ]);
 
 // First-word denylist: any extracted "recipient" whose first word is one of
 // these is almost certainly a place name, not a person.
 const PLACE_FIRST_WORDS = new Set([
     'Gove', 'Nhulunbuy', 'Yirrkala', 'Elcho', 'Gapuwiyak', 'Darwin',
-    'Gapuwiyak', 'Malpi', 'Arnhem'
+    'Malpi', 'Arnhem'
 ]);
 
 // -----------------------------------------------------------------------------
@@ -150,6 +161,15 @@ function combinedDescription(po) {
 }
 
 /**
+ * Normalise the trailing "and family" / "& family" capitalisation variants
+ * so "Name and Family" and "Name and family" don't appear as separate
+ * entries in topRecipients. Always yields " and Family" (title case).
+ */
+function normalizeRecipientName(name) {
+    return name.replace(/\s+(&|and)\s+family$/i, ' and Family');
+}
+
+/**
  * Extract a recipient name from a PO's combined line-item descriptions.
  * Returns null if no match found or if the match is on the non-person denylist.
  */
@@ -157,7 +177,7 @@ function extractRecipient(po) {
     const text = combinedDescription(po);
     const match = text.match(RECIPIENT_REGEX);
     if (!match) return null;
-    const name = match[1].trim();
+    let name = match[1].trim();
 
     // Filter exact-match non-person denylist.
     if (NON_PERSON_NAMES.has(name)) return null;
@@ -165,6 +185,9 @@ function extractRecipient(po) {
     // Filter out names where the first word is a known place.
     const firstWord = name.split(' ')[0];
     if (PLACE_FIRST_WORDS.has(firstWord)) return null;
+
+    // Canonicalise "and family" casing.
+    name = normalizeRecipientName(name);
 
     return name;
 }
@@ -208,10 +231,11 @@ function dominantAccountCode(po) {
  * Rule order (most specific to least):
  *   1. Status-based exclusions (draft/cancelled/rejected)
  *   2. Internal corporate exclusion
- *   3. Supplier + account combos (Day 3)       ← high confidence
- *   4. Supplier-name hints                     ← high confidence
- *   5. Account-code inference                  ← medium/low confidence
- *   6. Recipient-fallback (Day 3)              ← medium confidence
+ *   3a. Supplier + account combos                ← high confidence
+ *   3b. Account-code family hints (Day 3b)       ← high confidence
+ *   4. Supplier-name hints                       ← high confidence
+ *   5. Account-code inference                    ← medium/low confidence
+ *   6. Recipient-fallback                        ← medium confidence
  *   7. Uncategorised
  */
 function classifyPO(po) {
@@ -229,14 +253,24 @@ function classifyPO(po) {
         return { excluded: 'internal_corporate' };
     }
 
-    // Step 3: Supplier + account code high-confidence combos.
-    // Checked BEFORE supplier-name-only hints because pairing is more specific.
+    // Step 3a: Supplier + account code high-confidence combos.
     for (const combo of SUPPLIER_ACCOUNT_COMBOS) {
         if (combo.supplierPattern.test(supplier) && combo.accountCodes.includes(accountCode)) {
             return {
                 category: combo.category,
                 confidence: combo.confidence,
                 reason: combo.reason
+            };
+        }
+    }
+
+    // Step 3b: Account-code family hints (e.g. any supplier + 250xx → charitable).
+    for (const hint of ACCOUNT_CODE_CATEGORY_HINTS) {
+        if (accountCode && hint.pattern.test(accountCode)) {
+            return {
+                category: hint.category,
+                confidence: hint.confidence,
+                reason: hint.reason
             };
         }
     }
@@ -281,11 +315,10 @@ function classifyPO(po) {
         };
     }
 
-    // Step 6: Recipient-name fallback (Day 3).
+    // Step 6: Recipient-name fallback.
     // If we can extract a named recipient and the spend isn't internal, treat
-    // as Family Charitable with medium confidence. Catches the long tail of
-    // "goods/fuel/tent to [Name]" PO descriptions on account codes that don't
-    // map cleanly to any specific rule above.
+    // as Family Charitable with medium confidence. Catches long-tail "goods/
+    // fuel/tent to [Name]" descriptions on account codes not covered above.
     const fallbackRecipient = extractRecipient(po);
     if (fallbackRecipient) {
         return {
@@ -472,11 +505,12 @@ function buildWelfareSummary(pos, opts = {}) {
             note: 'Heuristic classifier. Confidence levels per category indicate signal strength. Uncategorised bucket contains unmatched POs for tuning. See SAMPLING_FINDINGS.md §3-4 for rules.',
             rules: [
                 'Internal corporate exclusion: vehicle regos, office/boardroom/staff-meeting keywords, "pick up by RAC"',
-                'Supplier + account combo (high): Yirrkala Ent + 250xx → Family Charitable; BP + 63415 → Family Charitable; Gove Warehouse + 64480 → Whitegoods',
+                'Supplier + account combo (high): BP + 63415 → Family Charitable; Gove Warehouse + 64480 → Whitegoods',
+                'Account code family (high): 250xx → Family Charitable Payments (member voucher, supplier-agnostic)',
                 'Supplier name hint (high): Gove Transport/taxi → Transport; Air Frontier/Black Diamond/MAF → Transport; funeral/memorial → Family Funeral Support; medical/chemist → Medical; Harvey Norman/The Good Guys → Whitegoods',
                 'Account code 64605 Travel → Transport Assistance (medium)',
                 'Account 63950 + recipient → Family Charitable (medium); without recipient → Social & Cultural (low)',
-                'Recipient-fallback: any extractable "to/for/passenger [Name]" → Family Charitable (medium)',
+                'Recipient-fallback: any extractable "to/for/passenger/required by [Name]" → Family Charitable (medium)',
                 'Everything else: Uncategorised — inspect sampleDescriptions to tune rules'
             ]
         }
