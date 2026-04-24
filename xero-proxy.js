@@ -12,6 +12,12 @@
 // supplier records in ApprovalMax. Pulls AM POs where contact==='Unknown'
 // and cross-references against Xero's current contact list via Matt's
 // /api/contacts/:tenantId endpoint.
+//
+// Also exposes handleDraftCleanup — simpler operational worklist for the
+// AM admin (Matt + Duane) to action stale drafts in bulk. Same data source
+// as unknown-reconciliation, but returns a flat PO list with an auto-
+// suggested Action column (Delete if >staleDays old, Follow-up otherwise)
+// and supports CSV output via ?format=csv.
 
 const fetch = require('node-fetch');
 
@@ -440,9 +446,199 @@ function makeUnknownReconciliationHandler({ amClient, fetchAllPages, requireToke
     };
 }
 
+// Helper: wrap a single cell value for CSV output.
+// RFC 4180 — quote the cell if it contains a comma, double-quote, or newline,
+// and double any embedded double-quotes.
+function csvCell(value) {
+    if (value === null || value === undefined) return '';
+    const s = String(value);
+    if (/[",\r\n]/.test(s)) {
+        return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+}
+
+// Build a handler factory for /api/draft-cleanup. Emits a flat operational
+// worklist — one row per draft PO with a blank supplier — and auto-suggests
+// "Delete" (if >staleDays old) or "Follow up" (if newer). Intended to be
+// run per entity on a regular cadence by Matt + the dashboard owner.
+//
+// Query params:
+//   entity    - required; one of aborig/enterprises/rpmms/mining/invest
+//   from      - optional YYYY-MM-DD; createdAtOrAfter filter on AM side
+//               (defaults to 2025-06-01, same as dashboard AM_CUTOFF)
+//   staleDays - optional integer (default 30); drafts older than this are
+//               marked "Delete" in the Action column
+//   format    - optional 'csv' for Excel-friendly download;
+//               defaults to JSON
+//
+// Returns (JSON):
+//   {
+//     success: true,
+//     entityKey, organizationName,
+//     window: { createdAtOrAfter, staleDays },
+//     counts: { total, toDelete, toFollowUp, zeroAmount, nonZeroAmount,
+//               totalValue },
+//     drafts: [ { id, status, createdAt, daysAgo, amount, description,
+//                 hasAmount, action, requester } ]
+//   }
+//
+// Returns (CSV): one header row + one row per draft, columns:
+//   AM ID, Status, Date Raised, Days Ago, Amount, Description/Ref,
+//   Has Amount, Action, Requester
+function makeDraftCleanupHandler({ amClient, fetchAllPages, requireToken, maxPages = 35 }) {
+    return async function handleDraftCleanup(req, res) {
+        try {
+            const entityKey = req.query.entity;
+            if (!entityKey || !AM_COMPANY_ID_BY_KEY[entityKey]) {
+                return res.status(400).json({
+                    success: false,
+                    error: `entity query param required; must be one of: ${Object.keys(AM_COMPANY_ID_BY_KEY).join(', ')}`
+                });
+            }
+
+            const createdAtOrAfter = req.query.from || '2025-06-01';
+            const staleDaysParam = parseInt(req.query.staleDays, 10);
+            const staleDays = Number.isFinite(staleDaysParam) && staleDaysParam > 0
+                ? staleDaysParam : 30;
+            const format = (req.query.format || '').toLowerCase() === 'csv' ? 'csv' : 'json';
+
+            const companyId = AM_COMPANY_ID_BY_KEY[entityKey];
+            const orgName = XERO_ORG_NAME_BY_KEY[entityKey];
+
+            console.log(`[draft-cleanup] ${entityKey} staleDays=${staleDays} from=${createdAtOrAfter} format=${format}`);
+
+            const tok = await requireToken();
+
+            const { items: allPos, pages, capped } = await fetchAllPages(
+                tok.access_token,
+                companyId,
+                'purchase-orders',
+                { createdAtOrAfter },
+                maxPages
+            );
+
+            const now = Date.now();
+            const msPerDay = 1000 * 60 * 60 * 24;
+
+            // Filter to draft POs where the supplier field is blank. These
+            // are the "Unknown $316K" cohort from the dashboard — draft
+            // records with no contact attached, which AM lets you save but
+            // won't let you submit.
+            const drafts = allPos
+                .filter(po => {
+                    const supplier = (po.contact || '').trim().toLowerCase();
+                    const status = (po.requestStatus || '').toLowerCase();
+                    const isBlank = supplier === '' || supplier === 'unknown';
+                    const isDraft = status === 'draft';
+                    return isBlank && isDraft;
+                })
+                .map(po => {
+                    const createdAt = po.createdAt || po.date || po.modifiedAt || null;
+                    const daysAgo = createdAt
+                        ? Math.floor((now - new Date(createdAt).getTime()) / msPerDay)
+                        : null;
+
+                    // Description fallback: line-item description if PO-level is blank.
+                    let description = po.description || po.reference || '';
+                    if (!description && Array.isArray(po.lineItems)) {
+                        const firstLineDesc = po.lineItems
+                            .map(li => li.description)
+                            .find(d => d && d.trim());
+                        if (firstLineDesc) description = firstLineDesc;
+                    }
+
+                    const amount = po.total || 0;
+                    const hasAmount = amount > 0;
+
+                    // Action suggestion: Delete if stale, Follow up if recent.
+                    // Null daysAgo (unexpected — missing date) falls through to Follow up
+                    // so it's surfaced for human review rather than silently deleted.
+                    let action = 'Follow up';
+                    if (daysAgo !== null && daysAgo > staleDays) action = 'Delete';
+
+                    return {
+                        id: po.id || null,
+                        status: po.requestStatus || 'draft',
+                        createdAt,
+                        daysAgo,
+                        amount: Math.round(amount * 100) / 100,
+                        hasAmount,
+                        description: (description || '').slice(0, 200),
+                        action,
+                        requester: po.author?.name || po.createdBy?.name || null
+                    };
+                });
+
+            // Sort by daysAgo descending (oldest first), with null daysAgo at the bottom.
+            drafts.sort((a, b) => {
+                if (a.daysAgo === null && b.daysAgo === null) return 0;
+                if (a.daysAgo === null) return 1;
+                if (b.daysAgo === null) return -1;
+                return b.daysAgo - a.daysAgo;
+            });
+
+            const counts = {
+                total: drafts.length,
+                toDelete: drafts.filter(d => d.action === 'Delete').length,
+                toFollowUp: drafts.filter(d => d.action === 'Follow up').length,
+                zeroAmount: drafts.filter(d => !d.hasAmount).length,
+                nonZeroAmount: drafts.filter(d => d.hasAmount).length,
+                totalValue: Math.round(drafts.reduce((s, d) => s + (d.amount || 0), 0) * 100) / 100
+            };
+
+            console.log(`[draft-cleanup] ${entityKey}: ${drafts.length} drafts · ${counts.toDelete} to delete · ${counts.toFollowUp} to follow up · pages=${pages} capped=${capped}`);
+
+            if (format === 'csv') {
+                // CSV output — Excel-friendly. BOM prefix so Excel detects UTF-8
+                // and doesn't mangle any special characters in descriptions.
+                const header = [
+                    'AM ID', 'Status', 'Date Raised', 'Days Ago', 'Amount',
+                    'Description/Ref', 'Has Amount', 'Action', 'Requester'
+                ];
+                const rows = drafts.map(d => [
+                    d.id || '',
+                    d.status || '',
+                    d.createdAt ? d.createdAt.slice(0, 10) : '',   // YYYY-MM-DD only
+                    d.daysAgo === null ? '' : d.daysAgo,
+                    d.amount,
+                    d.description || '',
+                    d.hasAmount ? 'Y' : 'N',
+                    d.action,
+                    d.requester || ''
+                ]);
+
+                const csv = '\uFEFF' + [header, ...rows]
+                    .map(r => r.map(csvCell).join(','))
+                    .join('\r\n');
+
+                const filename = `draft-cleanup-${entityKey}-${new Date().toISOString().slice(0, 10)}.csv`;
+                res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+                res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+                return res.send(csv);
+            }
+
+            res.json({
+                success: true,
+                generatedAt: new Date().toISOString(),
+                entityKey,
+                organizationName: orgName,
+                window: { createdAtOrAfter, staleDays },
+                pages: { fetched: pages, capped, maxPages },
+                counts,
+                drafts
+            });
+        } catch (err) {
+            console.error(`[draft-cleanup] Error: ${err.message}`);
+            res.status(err.status || 500).json({ success: false, error: err.message });
+        }
+    };
+}
+
 module.exports = {
     handleBudgetVsActual,
     makeUnknownReconciliationHandler,
+    makeDraftCleanupHandler,
     // exported for testing / future routes:
     fetchBudgetSummary,
     fetchProfitLoss,
