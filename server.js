@@ -6,7 +6,7 @@ const fetch = require('node-fetch');
 const { Pool } = require('pg');
 const amClient = require('./approvalmax-client');
 const welfare = require('./welfare-categoriser');
-const { handleBudgetVsActual } = require('./xero-proxy');
+const { handleBudgetVsActual, makeUnknownReconciliationHandler } = require('./xero-proxy');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -336,6 +336,17 @@ async function requireToken() {
 app.use(express.json());
 app.use(express.static('public'));
 app.get('/api/budget-vs-actual', handleBudgetVsActual);
+
+// /api/unknown-reconciliation — cross-reference AM "Unknown" POs with the
+// current Xero supplier list for the same entity. See xero-proxy.js for
+// query params and response shape. Handler is a factory because it needs
+// our AM client + pagination helpers, which live in this file.
+app.get('/api/unknown-reconciliation', makeUnknownReconciliationHandler({
+    amClient,
+    fetchAllPages,
+    requireToken,
+    maxPages: MAX_PAGES_FOR_ENTITY_SCAN
+}));
 
 // ────────────────────────────────────────────────────────────────────────
 // Homepage
