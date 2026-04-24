@@ -48,20 +48,8 @@ const DEFAULT_WELFARE_FY_START = '2025-07-01';
 const ABORIGINAL_CORP_COMPANY_ID = 'c32a3d25-1a02-4f87-82d6-8584746119c1';
 
 // Maximum pages fetched per (entity, type) combo in summary endpoint.
-// AM caps limit at 100 per page, so MAX_PAGES_PER_COUNT=20 = 2,000 records.
-// AM rate limit is 100 reads/min per ClientId+CompanyId; 5 entities × 2 types × 20 pages
-// = 200 calls worst case but spread across different CompanyIds so well within limits.
 const MAX_PAGES_PER_COUNT = 20;
-
-// For the welfare endpoint we may need more pages than the summary cap because
-// Aboriginal Corp hits 2,000+ POs per year and we want the *items themselves*,
-// not just the count. Set higher and revisit if it becomes an issue.
-const MAX_PAGES_FOR_WELFARE = 35;  // 3,500 records max
-
-// For the entity-scan endpoint (Day 3g). Cross-entity reconnaissance pulls
-// items with line items so we can aggregate by account code. 30 pages × 100 =
-// 3,000 records per entity. Aboriginal Corp is near this cap; other entities
-// are expected to have far fewer POs.
+const MAX_PAGES_FOR_WELFARE = 35;
 const MAX_PAGES_FOR_ENTITY_SCAN = 30;
 
 // Statuses that represent genuine procurement intent / commitment at RAC.
@@ -79,8 +67,6 @@ const MAX_PAGES_FOR_ENTITY_SCAN = 30;
 // See dashboard methodology caption for the user-facing explanation.
 const FINANCIAL_STATUSES = new Set(['approved', 'onApproval']);
 
-// Helper: pull the three new filter params from a request's query string in one go.
-// Returns { createdAtOrAfter, orderBy, orderDirection } with undefineds for absent values.
 function extractAnalysisFilters(query) {
     return {
         createdAtOrAfter: query.createdAtOrAfter || undefined,
@@ -89,10 +75,6 @@ function extractAnalysisFilters(query) {
     };
 }
 
-// Helper: fully paginate through AM's continuationToken for one (entity, type) combo
-// and return the total record count. Does NOT return the items themselves - that would
-// defeat the purpose of an aggregation endpoint. Stops at MAX_PAGES_PER_COUNT with
-// capped=true so we never loop indefinitely.
 async function countAllPages(accessToken, companyId, xeroType, baseFilters) {
     let count = 0;
     let pages = 0;
@@ -117,10 +99,6 @@ async function countAllPages(accessToken, companyId, xeroType, baseFilters) {
     return { count, pages, capped };
 }
 
-// Helper: fully paginate and RETURN the items themselves (unlike countAllPages).
-// Used by the welfare endpoint where we need to inspect each PO's line items,
-// tracking, and events. Accepts a configurable page cap so different callers
-// can tune the ceiling (welfare view = 35, entity scan = 30).
 async function fetchAllPages(accessToken, companyId, xeroType, baseFilters, pageCap = MAX_PAGES_FOR_WELFARE) {
     const allItems = [];
     let pages = 0;
@@ -405,10 +383,6 @@ app.use(express.json());
 app.use(express.static('public'));
 app.get('/api/budget-vs-actual', handleBudgetVsActual);
 
-// /api/unknown-reconciliation — cross-reference AM "Unknown" POs with the
-// current Xero supplier list for the same entity. See xero-proxy.js for
-// query params and response shape. Handler is a factory because it needs
-// our AM client + pagination helpers, which live in this file.
 app.get('/api/unknown-reconciliation', makeUnknownReconciliationHandler({
     amClient,
     fetchAllPages,
@@ -416,11 +390,6 @@ app.get('/api/unknown-reconciliation', makeUnknownReconciliationHandler({
     maxPages: MAX_PAGES_FOR_ENTITY_SCAN
 }));
 
-// /api/draft-cleanup — operational worklist of blank-supplier draft POs
-// with auto-suggested action (Delete if >staleDays old, Follow-up
-// otherwise). Supports JSON (default) and ?format=csv for Excel download.
-// See xero-proxy.js for full query-param and column documentation.
-// Same DI pattern as unknown-reconciliation above.
 app.get('/api/draft-cleanup', makeDraftCleanupHandler({
     amClient,
     fetchAllPages,
@@ -429,7 +398,10 @@ app.get('/api/draft-cleanup', makeDraftCleanupHandler({
 }));
 
 // ────────────────────────────────────────────────────────────────────────
-// Homepage
+// Homepage — admin / OAuth-setup and ad-hoc test controls.
+// This is the page used to re-authenticate ApprovalMax and to poke at
+// API shapes during development. The main user dashboard lives at
+// /dashboard.html (served from public/).
 // ────────────────────────────────────────────────────────────────────────
 app.get('/', (req, res) => {
     res.send(`
@@ -506,71 +478,7 @@ app.get('/', (req, res) => {
             gap: 10px;
             margin: 15px 0;
         }
-        .control-row {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            align-items: center;
-            margin: 10px 0;
-        }
-        .control-row label { font-weight: 500; color: #4a5568; min-width: 130px; }
-        .control-row select, .control-row input[type="date"] {
-            padding: 8px;
-            border-radius: 6px;
-            border: 1px solid #cbd5e1;
-            font-size: 14px;
-            flex: 1;
-            min-width: 200px;
-        }
         .highlight { background: #fef3c7; padding: 2px 4px; border-radius: 3px; }
-        .kpi-row {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 12px;
-            margin: 15px 0;
-        }
-        .kpi-card {
-            background: white;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            padding: 16px;
-            text-align: center;
-        }
-        .kpi-card .num { font-size: 24px; font-weight: 700; color: #8B5A96; }
-        .kpi-card .label { font-size: 12px; color: #64748b; margin-top: 4px; }
-        .category-card {
-            background: white;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            padding: 16px;
-            margin: 10px 0;
-        }
-        .category-card .cat-name { font-size: 16px; font-weight: 600; color: #2d3748; }
-        .category-card .cat-figures { display: flex; gap: 20px; margin: 8px 0; flex-wrap: wrap; }
-        .category-card .cat-fig-label { font-size: 11px; color: #64748b; text-transform: uppercase; }
-        .category-card .cat-fig-value { font-size: 18px; font-weight: 700; color: #8B5A96; }
-        .category-card .ar-caption { font-size: 12px; color: #64748b; font-style: italic; margin-top: 8px; }
-        .pace-on-track { color: #059669; }
-        .pace-over { color: #dc2626; }
-        .pace-under { color: #d97706; }
-        .filter-summary {
-            background: #eff6ff;
-            border: 1px solid #bfdbfe;
-            color: #1e40af;
-            padding: 10px 14px;
-            border-radius: 6px;
-            font-size: 13px;
-            margin: 10px 0;
-        }
-        .capped-warning {
-            background: #fffbeb;
-            border: 1px solid #f59e0b;
-            color: #92400e;
-            padding: 10px 14px;
-            border-radius: 6px;
-            font-size: 13px;
-            margin: 10px 0;
-        }
     </style>
 </head>
 <body>
@@ -588,14 +496,38 @@ app.get('/', (req, res) => {
                 <li>Redirect URI: ${APPROVALMAX_CONFIG.redirectUri}</li>
                 <li>Token Status: <span id="tokenStatus">Checking...</span></li>
                 <li>Persistence: <span class="highlight">Postgres (survives restarts)</span></li>
+                <li>Main dashboard: <a href="/dashboard.html">/dashboard.html</a></li>
             </ul>
         </div>
 
         <div class="section">
-            <h3>Step 1: Authentication</h3>
+            <h3>Authentication</h3>
             <p>Runs the ApprovalMax OAuth flow. Tokens persist and auto-refresh before expiry.</p>
             <button onclick="startAuth()">Start ApprovalMax Authentication</button>
             <div id="authResult"></div>
+        </div>
+
+        <div class="section scan">
+            <h3>Ad-hoc API probes</h3>
+            <p style="color: #64748b; font-size: 13px;">
+                Direct hits against the real endpoints. Useful for debugging.
+                Each opens JSON output below.
+            </p>
+            <div class="button-grid">
+                <button onclick="callApi('/api/companies')" id="btn-api-companies">GET /api/companies</button>
+                <button onclick="callApi('/api/am/entity-scan')" id="btn-entity-scan" class="scan-btn">Entity scan (slow, ~60s)</button>
+                <button onclick="callApi('/api/budget-vs-actual')" id="btn-budget">Budget vs Actual (all 5)</button>
+                <button onclick="callApi('/api/welfare/aboriginal-corp')" id="btn-welfare">Welfare view (Aborig. Corp)</button>
+                <button onclick="callApi('/api/unknown-reconciliation?entity=enterprises')" id="btn-recon">Unknown recon (Enterprises)</button>
+                <button onclick="callApi('/api/draft-cleanup?entity=enterprises')" id="btn-draft">Draft cleanup (Enterprises)</button>
+            </div>
+            <div id="apiResult"></div>
+        </div>
+
+        <div class="section">
+            <h3>Debug</h3>
+            <button onclick="showDebugInfo()">Show DB Token State</button>
+            <div id="debugInfo"></div>
         </div>
     </div>
 
@@ -616,6 +548,30 @@ app.get('/', (req, res) => {
                 .catch(err => {
                     document.getElementById('authResult').innerHTML =
                         '<div class="status disconnected">Network Error: ' + err.message + '</div>';
+                });
+        }
+
+        function callApi(path) {
+            document.getElementById('apiResult').innerHTML =
+                '<div class="status pending">Loading… (some calls take 30-90s)</div>';
+            fetch(path)
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('apiResult').innerHTML =
+                        '<div class="result">' + JSON.stringify(data, null, 2) + '</div>';
+                })
+                .catch(err => {
+                    document.getElementById('apiResult').innerHTML =
+                        '<div class="status disconnected">Error: ' + err.message + '</div>';
+                });
+        }
+
+        function showDebugInfo() {
+            fetch('/debug/info')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('debugInfo').innerHTML =
+                        '<div class="result">' + JSON.stringify(data, null, 2) + '</div>';
                 });
         }
 
@@ -739,10 +695,9 @@ app.get('/auth/status', async (req, res) => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════
-// REAL API ENDPOINTS - Xero-typed, using approvalmax-client
+// REAL API ENDPOINTS
 // ═════════════════════════════════════════════════════════════════════════
 
-// GET /api/companies - list the organisations
 app.get('/api/companies', async (req, res) => {
     try {
         const tok = await requireToken();
@@ -754,7 +709,6 @@ app.get('/api/companies', async (req, res) => {
     }
 });
 
-// GET /api/welfare/aboriginal-corp - the "We Provided" view prototype
 app.get('/api/welfare/aboriginal-corp', async (req, res) => {
     try {
         const tok = await requireToken();
@@ -796,7 +750,6 @@ app.get('/api/welfare/aboriginal-corp', async (req, res) => {
     }
 });
 
-// GET /api/am/entity-scan - cross-entity reconnaissance
 app.get('/api/am/entity-scan', async (req, res) => {
     try {
         const tok = await requireToken();
@@ -863,7 +816,6 @@ app.get('/api/am/entity-scan', async (req, res) => {
     }
 });
 
-// GET /api/xero/summary - cross-entity KPI summary (POs + Bills across all 5 orgs)
 app.get('/api/xero/summary', async (req, res) => {
     try {
         const tok = await requireToken();
@@ -941,7 +893,6 @@ app.get('/api/xero/summary', async (req, res) => {
     }
 });
 
-// GET /api/xero/:type - single type across ALL entities
 app.get('/api/xero/:type', async (req, res) => {
     try {
         const tok = await requireToken();
@@ -1001,7 +952,6 @@ app.get('/api/xero/:type', async (req, res) => {
     }
 });
 
-// GET /api/xero/:type/:companyId - single type for a single entity
 app.get('/api/xero/:type/:companyId', async (req, res) => {
     try {
         const tok = await requireToken();
@@ -1040,7 +990,6 @@ app.get('/api/xero/:type/:companyId', async (req, res) => {
     }
 });
 
-// GET /api/debug/raw?companyId=...&path=... - raw passthrough for reconciliation
 app.get('/api/debug/raw', async (req, res) => {
     try {
         const tok = await requireToken();
@@ -1057,9 +1006,6 @@ app.get('/api/debug/raw', async (req, res) => {
     }
 });
 
-// ────────────────────────────────────────────────────────────────────────
-// Debug / health
-// ────────────────────────────────────────────────────────────────────────
 app.get('/debug/info', async (req, res) => {
     try {
         const result = await pool.query(
