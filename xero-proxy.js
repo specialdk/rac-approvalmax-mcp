@@ -7,6 +7,11 @@
 // Wired into server.js by registering the handler on /api/budget-vs-actual.
 // Placement matters: the route must be registered BEFORE /api/xero/:type,
 // otherwise Express's wildcard matcher captures "budget-vs-actual" as :type.
+//
+// Also exposes handleUnknownReconciliation for investigating "Unknown"
+// supplier records in ApprovalMax. Pulls AM POs where contact==='Unknown'
+// and cross-references against Xero's current contact list via Matt's
+// /api/contacts/:tenantId endpoint.
 
 const fetch = require('node-fetch');
 
@@ -25,15 +30,41 @@ const XERO_ORG_NAME_BY_KEY = {
     invest:       'Miliditjpi'
 };
 
+// Xero tenant UUIDs per entity (retrieved from Matt's /api/connection-status
+// on 2026-04-24). Hardcoded because these don't change unless an entity
+// re-authorises Xero. Used for endpoints that take tenantId in the URL path
+// rather than organizationName in the body (e.g. /api/contacts/:tenantId).
+const XERO_TENANT_ID_BY_KEY = {
+    aborig:       '27d83979-eb88-428e-9b90-75254dd5c7ef',
+    enterprises:  '8a319f5e-d623-4df8-8ae0-46372cfb87b2',
+    rpmms:        '5c8149da-bff5-4a86-ac03-75e7dfb3854a',
+    mining:       '319abbba-14aa-42ce-bf68-291c3d7454a7',
+    invest:       'af01da3f-0533-42cc-ad9a-4d359e2a1dd9'
+};
+
+// AM companyId per entity (for calling our own AM client helpers).
+// Duplicated from dashboard.html COMPANY_ID_TO_KEY; worth keeping in sync
+// but forcing a reverse lookup here would couple the frontend and backend
+// for no good reason.
+const AM_COMPANY_ID_BY_KEY = {
+    aborig:       'c32a3d25-1a02-4f87-82d6-8584746119c1',
+    enterprises:  '77b4e48b-4dee-42fb-afdb-dae38c69df3d',
+    rpmms:        'ef3d29f3-56da-4b76-8a57-cf1d10919391',
+    mining:       '6655cc87-de32-40d1-aee9-5f78abac57fe',
+    invest:       '075c13e2-4476-4541-b8e2-85215a5656dc'
+};
+
 // 5-minute in-memory cache keeps dashboard reloads snappy without
 // hammering Matt's server. BI data doesn't change by the second.
+// Contacts use a longer TTL (1 hour) since supplier lists change slowly.
 const xeroCache = new Map();
 const XERO_CACHE_TTL_MS = 5 * 60 * 1000;
+const CONTACTS_CACHE_TTL_MS = 60 * 60 * 1000;
 
-function cacheGet(key) {
+function cacheGet(key, ttlMs = XERO_CACHE_TTL_MS) {
     const e = xeroCache.get(key);
     if (!e) return null;
-    if (Date.now() - e.storedAt > XERO_CACHE_TTL_MS) {
+    if (Date.now() - e.storedAt > ttlMs) {
         xeroCache.delete(key);
         return null;
     }
@@ -97,6 +128,33 @@ async function fetchProfitLoss(orgName, periodMonths = 10, date) {
     const data = await res.json();
     cacheSet(key, data);
     return data;
+}
+
+// Fetch Xero contact list for an entity. Returns array of
+// { contactID, name, isSupplier, isCustomer, emailAddress } from Matt's
+// GET /api/contacts/:tenantId endpoint. Cached for 1 hour because supplier
+// lists rarely change within a working session.
+async function fetchContacts(tenantId) {
+    const key = `contacts:${tenantId}`;
+    const cached = cacheGet(key, CONTACTS_CACHE_TTL_MS);
+    if (cached) return cached;
+
+    const res = await fetch(`${XERO_API_BASE}/api/contacts/${tenantId}`, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' }
+    });
+
+    if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(`Xero contacts ${res.status}: ${errText.slice(0, 200)}`);
+    }
+
+    const data = await res.json();
+    // Matt's endpoint returns the raw Xero contact array; normalise just in
+    // case he changes it to wrap in { contacts: [...] } later.
+    const contacts = Array.isArray(data) ? data : (data.contacts || data.data || []);
+    cacheSet(key, contacts);
+    return contacts;
 }
 
 // Sum a Xero BudgetSummary report into { revenue, expenses, netProfit }.
@@ -234,11 +292,163 @@ async function handleBudgetVsActual(req, res) {
     }
 }
 
+// Build a handler factory for /api/unknown-reconciliation. The handler
+// needs access to the AM client + fetchAllPages helper from server.js,
+// so we accept those as dependencies rather than reach across files.
+//
+// Query params:
+//   entity   - required; one of aborig/enterprises/rpmms/mining/invest
+//   from     - optional YYYY-MM-DD; createdAtOrAfter filter on AM side
+//              (defaults to 2025-06-01, same as dashboard AM_CUTOFF)
+//
+// Returns:
+//   {
+//     success: true,
+//     entityKey, organizationName, tenantId,
+//     amPos: [ { number, createdAt, amSupplier, accountCodes, amount,
+//                description, requester, status } ],
+//     xeroSuppliers: [ { name, contactID, emailAddress } ],
+//     counts: { unknownPos, xeroSuppliersTotal, xeroSuppliersActive }
+//   }
+function makeUnknownReconciliationHandler({ amClient, fetchAllPages, requireToken, maxPages = 35 }) {
+    return async function handleUnknownReconciliation(req, res) {
+        try {
+            const entityKey = req.query.entity;
+            if (!entityKey || !XERO_TENANT_ID_BY_KEY[entityKey]) {
+                return res.status(400).json({
+                    success: false,
+                    error: `entity query param required; must be one of: ${Object.keys(XERO_TENANT_ID_BY_KEY).join(', ')}`
+                });
+            }
+
+            const createdAtOrAfter = req.query.from || '2025-06-01';
+            const tenantId = XERO_TENANT_ID_BY_KEY[entityKey];
+            const companyId = AM_COMPANY_ID_BY_KEY[entityKey];
+            const orgName = XERO_ORG_NAME_BY_KEY[entityKey];
+
+            console.log(`[unknown-recon] ${entityKey} tenantId=${tenantId} companyId=${companyId} from=${createdAtOrAfter}`);
+
+            const tok = await requireToken();
+
+            // Fetch both sides in parallel. AM side is the slow one (up to
+            // 35 pages of 100 POs each); Xero contacts is one call.
+            const [amResult, xeroContacts] = await Promise.all([
+                fetchAllPages(
+                    tok.access_token,
+                    companyId,
+                    'purchase-orders',
+                    { createdAtOrAfter },
+                    maxPages
+                ),
+                fetchContacts(tenantId)
+            ]);
+
+            const { items: allPos, pages, capped } = amResult;
+            console.log(`[unknown-recon] ${entityKey}: ${allPos.length} AM POs in window, ${xeroContacts.length} Xero contacts`);
+
+            // Filter to just the "Unknown" POs.
+            const unknownPos = allPos
+                .filter(po => {
+                    const supplier = (po.contact || '').trim().toLowerCase();
+                    return supplier === '' || supplier === 'unknown';
+                })
+                .map(po => {
+                    // Collect account codes from line items (if any).
+                    const accountCodes = Array.isArray(po.lineItems)
+                        ? [...new Set(po.lineItems
+                            .map(li => li.accountCode)
+                            .filter(c => c))]
+                        : [];
+                    // Collect account names similarly — useful when code alone isn't obvious.
+                    const accounts = Array.isArray(po.lineItems)
+                        ? [...new Set(po.lineItems
+                            .map(li => li.account)
+                            .filter(a => a))]
+                        : [];
+                    // Description fallback: use first non-empty line item description.
+                    let description = po.description || po.reference || '';
+                    if (!description && Array.isArray(po.lineItems)) {
+                        const firstLineDesc = po.lineItems
+                            .map(li => li.description)
+                            .find(d => d && d.trim());
+                        if (firstLineDesc) description = firstLineDesc;
+                    }
+
+                    return {
+                        number: po.documentNumber || po.number || po.id || null,
+                        id: po.id || null,
+                        createdAt: po.createdAt || po.date || po.modifiedAt || null,
+                        amSupplier: po.contact || '(blank)',
+                        accountCodes,
+                        accounts,
+                        amount: po.total || 0,
+                        description: (description || '').slice(0, 200),
+                        requester: po.author?.name || po.createdBy?.name || null,
+                        status: po.requestStatus || 'unknown'
+                    };
+                });
+
+            // Sort Unknowns by amount desc so the biggest dollar-risk items are at the top.
+            unknownPos.sort((a, b) => (b.amount || 0) - (a.amount || 0));
+
+            // Xero supplier list — filter to isSupplier=true and sort
+            // alphabetically for easy eyeballing. Keep archived/inactive
+            // separate so we can see if any matches live in the inactive pool.
+            const suppliersActive = xeroContacts
+                .filter(c => c.isSupplier === true && c.contactStatus !== 'ARCHIVED')
+                .map(c => ({
+                    name: c.name || '(unnamed)',
+                    contactID: c.contactID || null,
+                    emailAddress: c.emailAddress || null
+                }))
+                .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+            const suppliersArchived = xeroContacts
+                .filter(c => c.isSupplier === true && c.contactStatus === 'ARCHIVED')
+                .map(c => ({
+                    name: c.name || '(unnamed)',
+                    contactID: c.contactID || null,
+                    emailAddress: c.emailAddress || null
+                }))
+                .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+            res.json({
+                success: true,
+                generatedAt: new Date().toISOString(),
+                entityKey,
+                organizationName: orgName,
+                tenantId,
+                companyId,
+                window: { createdAtOrAfter },
+                pages: { fetched: pages, capped, maxPages },
+                counts: {
+                    amPosInWindow: allPos.length,
+                    unknownPos: unknownPos.length,
+                    unknownTotalValue: Math.round(unknownPos.reduce((s, p) => s + (p.amount || 0), 0) * 100) / 100,
+                    xeroContactsTotal: xeroContacts.length,
+                    xeroSuppliersActive: suppliersActive.length,
+                    xeroSuppliersArchived: suppliersArchived.length
+                },
+                amPos: unknownPos,
+                xeroSuppliersActive,
+                xeroSuppliersArchived
+            });
+        } catch (err) {
+            console.error(`[unknown-recon] Error: ${err.message}`);
+            res.status(err.status || 500).json({ success: false, error: err.message });
+        }
+    };
+}
+
 module.exports = {
     handleBudgetVsActual,
+    makeUnknownReconciliationHandler,
     // exported for testing / future routes:
     fetchBudgetSummary,
     fetchProfitLoss,
+    fetchContacts,
     parseBudgetReport,
-    XERO_ORG_NAME_BY_KEY
+    XERO_ORG_NAME_BY_KEY,
+    XERO_TENANT_ID_BY_KEY,
+    AM_COMPANY_ID_BY_KEY
 };
