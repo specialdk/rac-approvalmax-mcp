@@ -307,8 +307,8 @@ async function handleBudgetVsActual(req, res) {
 //     entityKey, organizationName, tenantId,
 //     amPos: [ { number, createdAt, amSupplier, accountCodes, amount,
 //                description, requester, status } ],
-//     xeroSuppliers: [ { name, contactID, emailAddress } ],
-//     counts: { unknownPos, xeroSuppliersTotal, xeroSuppliersActive }
+//     xeroSuppliersActive, xeroSuppliersArchived,
+//     counts: { unknownPos, xeroSuppliersActive, xeroSuppliersArchived, ... }
 //   }
 function makeUnknownReconciliationHandler({ amClient, fetchAllPages, requireToken, maxPages = 35 }) {
     return async function handleUnknownReconciliation(req, res) {
@@ -430,8 +430,8 @@ function makeUnknownReconciliationHandler({ amClient, fetchAllPages, requireToke
                     xeroSuppliersArchived: suppliersArchived.length
                 },
                 amPos: unknownPos,
-                xeroSuppliersActive,
-                xeroSuppliersArchived
+                xeroSuppliersActive: suppliersActive,
+                xeroSuppliersArchived: suppliersArchived
             });
         } catch (err) {
             console.error(`[unknown-recon] Error: ${err.message}`);
