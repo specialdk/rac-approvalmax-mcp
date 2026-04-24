@@ -42,7 +42,6 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
 .mast-meta .trial-clock { color: var(--ochre-pale); font-weight: 500; }
 .mast-meta .trial-urgent { color: var(--terra-soft); }
 
-/* Live status pill */
 .status-pill { display: inline-block; padding: 3px 10px; margin-left: 10px; font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 2px; border-radius: 2px; vertical-align: middle; }
 .status-pill.loading { background: var(--ochre); color: var(--ink); animation: pulse 1.6s ease-in-out infinite; }
 .status-pill.live { background: var(--moss); color: var(--paper); }
@@ -129,7 +128,6 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
 .data-table .family-row td:first-child { font-family: 'IBM Plex Serif', serif; font-weight: 500; font-size: 14px; }
 .data-table .placeholder-row td { color: var(--ink-faint); font-style: italic; text-align: center; padding: 20px; }
 
-/* Budget vs Actual card (FY26 Xero data) */
 .budget-section { margin-bottom: 24px; }
 .budget-table td.num.pct { font-family: 'IBM Plex Serif', serif; font-size: 15px; font-weight: 500; }
 .budget-table td.num.pct.ok { color: var(--moss); }
@@ -182,7 +180,6 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
 
 .footer { max-width: 1400px; margin: 48px auto 0; padding: 24px 32px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--ink-mute); }
 
-/* Placeholder shimmer for numeric values while loading */
 .dyn-num { display: inline-block; min-width: 40px; color: var(--ink-faint); }
 .dyn-num.loaded { color: inherit; }
 
@@ -226,14 +223,13 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
 
     <div class="kpi-strip">
         <div class="kpi"><div class="kpi-label">Committed FY26</div><div class="kpi-value" id="kpiCommitted">—</div><div class="kpi-sub">across <span id="kpiEntityCount">—</span> entities · approved + on-approval</div></div>
-        <div class="kpi"><div class="kpi-label">Total POs</div><div class="kpi-value" id="kpiTotalPos">—</div><div class="kpi-sub">all statuses since 1 Jun 2025</div></div>
-        <div class="kpi"><div class="kpi-label">Approved</div><div class="kpi-value" id="kpiApproved">—</div><div class="kpi-sub"><span id="kpiApprovedPct">—</span> of total</div></div>
+        <div class="kpi"><div class="kpi-label">Total POs</div><div class="kpi-value" id="kpiTotalPos">—</div><div class="kpi-sub">decisions since 1 Jun 2025 · excludes drafts</div></div>
+        <div class="kpi"><div class="kpi-label">Approved</div><div class="kpi-value" id="kpiApproved">—</div><div class="kpi-sub"><span id="kpiApprovedPct">—</span> of decided POs</div></div>
         <div class="kpi"><div class="kpi-label">On Approval</div><div class="kpi-value warn" id="kpiOnApproval">—</div><div class="kpi-sub"><span id="kpiOnApprovalSub">awaiting sign-off</span></div></div>
         <div class="kpi"><div class="kpi-label">Rejected / Cancelled</div><div class="kpi-value alert" id="kpiRejCan">—</div><div class="kpi-sub">see governance detail</div></div>
         <div class="kpi"><div class="kpi-label">Entities live in AM</div><div class="kpi-value">5 of 7</div><div class="kpi-sub">Ngarrkuwuy &amp; Marrin Sq. outside</div></div>
     </div>
 
-    <!-- Collapsible governance -->
     <div class="gov-toggle-row">
         <button class="gov-toggle" id="govToggle">
             <span><span id="govChevron">▸</span>&nbsp;&nbsp;Governance &amp; draft-rate detail</span>
@@ -241,7 +237,7 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
         </button>
         <div class="gov-strip hidden" id="govStrip">
             <div class="gov-methodology">
-                <strong>Methodology</strong> Financial figures on this dashboard (committed spend, top suppliers, budget-vs-actual) include POs with status <em>approved</em> or <em>on-approval</em>. Drafts are treated as procurement intent, not commitment — AM auto-saves partial form state when a user abandons a PO, producing stale records that don't represent real spend. Rejected and cancelled POs are also excluded. Drafts are shown below as a governance signal to keep periodically clean.
+                <strong>Methodology</strong> Financial figures (committed spend, top suppliers, budget-vs-actual) and PO counts shown on this dashboard both <em>exclude drafts</em>. Drafts are procurement intent, not commitment — AM auto-saves partial form state when a user abandons a PO, producing stale records that don't represent real spend or real decisions. The "Total POs" figure is the count of PO <em>decisions</em> (approved, on-approval, rejected, cancelled). Drafts are shown below as a governance signal to keep periodically clean.
             </div>
             <div class="gov-title">Draft hygiene per entity</div>
             <div class="gov-body">
@@ -308,7 +304,6 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
             </div>
         </div>
 
-        <!-- FY26 Budget vs Actual -->
         <div class="card budget-section">
             <div class="card-head">
                 <div class="card-title">FY26 Budget vs Actual</div>
@@ -396,7 +391,6 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
             </div>
         </div>
 
-        <!-- FY26 Budget vs Actual -->
         <div class="card budget-section">
             <div class="card-head">
                 <div class="card-title">FY26 Budget vs Actual</div>
@@ -441,7 +435,7 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
                     <thead><tr><th>Supplier</th><th class="num">POs</th><th class="num">Avg / PO</th><th class="num">Total</th></tr></thead>
                     <tbody id="entSuppliersBody"><tr class="placeholder-row"><td colspan="4">Loading…</td></tr></tbody>
                 </table>
-                <div class="todo" style="margin-top: 16px;" id="entBlankFlag" style="display: none;"><strong>FLAG</strong> <span id="entBlankFlagBody">—</span></div>
+                <div class="todo" style="margin-top: 16px; display: none;" id="entBlankFlag"><strong>FLAG</strong> <span id="entBlankFlagBody">—</span></div>
             </div>
             <div class="card">
                 <div class="card-head"><div class="card-title">Spend by programme</div><div class="card-meta">by account code</div></div>
@@ -470,7 +464,6 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
             </div>
         </div>
 
-        <!-- FY26 Budget vs Actual -->
         <div class="card budget-section">
             <div class="card-head">
                 <div class="card-title">FY26 Budget vs Actual</div>
@@ -544,7 +537,6 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
             </div>
         </div>
 
-        <!-- FY26 Budget vs Actual -->
         <div class="card budget-section">
             <div class="card-head">
                 <div class="card-title">FY26 Budget vs Actual</div>
@@ -618,7 +610,6 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
             </div>
         </div>
 
-        <!-- FY26 Budget vs Actual -->
         <div class="card budget-section">
             <div class="card-head">
                 <div class="card-title">FY26 Budget vs Actual</div>
@@ -676,7 +667,6 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
 
 </div>
 
-<!-- Auth prompt (hidden unless needed) -->
 <div class="auth-prompt" id="authPrompt" style="display: none;">
     <h2>Not connected to ApprovalMax</h2>
     <p>This dashboard pulls live data from the ApprovalMax API. You need to authenticate the integration before data can be loaded.</p>
@@ -693,7 +683,6 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
 //   Constants & state
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Map AM companyId → our local entity key (used to target dashboard panels).
 const COMPANY_ID_TO_KEY = {
     'c32a3d25-1a02-4f87-82d6-8584746119c1': 'aborig',
     '77b4e48b-4dee-42fb-afdb-dae38c69df3d': 'enterprises',
@@ -702,7 +691,6 @@ const COMPANY_ID_TO_KEY = {
     '075c13e2-4476-4541-b8e2-85215a5656dc': 'invest'
 };
 
-// Short display labels for compact contexts (top-supplier table, etc).
 const ENTITY_SHORT_LABEL = {
     aborig: 'Aborig. Corp',
     enterprises: 'Enterprises',
@@ -711,11 +699,10 @@ const ENTITY_SHORT_LABEL = {
     invest: 'Investments'
 };
 
-const TRIAL_EXPIRY = '2026-05-05';          // AM Premium trial end date
-const FY_START = '2025-07-01';               // FY26 start
-const AM_CUTOFF = '2025-06-01';              // AM adoption cutoff
+const TRIAL_EXPIRY = '2026-05-05';
+const FY_START = '2025-07-01';
+const AM_CUTOFF = '2025-06-01';
 
-// Annual Report baselines (from welfare-categoriser.js for FY25).
 const AR_BASELINES = {
     'Family Charitable Payments': 1403221,
     'Transport Assistance':       360000,
@@ -777,7 +764,33 @@ function daysBetween(fromIso, toIso) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//   Entity + panel switching (no data dependency)
+//   Non-draft PO-count helper
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Returns the count of POs that are NOT drafts for a given entity — i.e.
+// POs that went to a decision point (approved, onApproval, rejected,
+// cancelled, or any edge status like notSubmitted). Drafts are abandoned
+// form state and are excluded from "Total POs" displays across the
+// dashboard, in the same way they're excluded from financial figures.
+// If the entity-scan response was capped (i.e. there are more POs than
+// we fetched), the raw posTotal/draftCount we have both reflect the
+// capped subset, so their difference is still the accurate non-draft
+// count of what we've seen — we just show the "+" suffix honestly.
+function nonDraftCount(e) {
+    if (!e) return 0;
+    return (e.posTotal || 0) - (e.draftCount || 0);
+}
+
+// Returns a display string for an entity's non-draft PO count, with the
+// "+" suffix preserved when the scan was capped. Used anywhere a PO
+// count is rendered as text (tab meta, overview cards, entity panels).
+function nonDraftCountDisplay(e) {
+    const n = nonDraftCount(e);
+    return e && e.capped ? (n + '+') : num(n);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//   Entity + panel switching
 // ═══════════════════════════════════════════════════════════════════════════
 
 function setEntity(key) {
@@ -800,7 +813,7 @@ document.getElementById('govToggle').addEventListener('click', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-//   Header / masthead — static context (dates)
+//   Header / masthead
 // ═══════════════════════════════════════════════════════════════════════════
 
 function renderMasthead() {
@@ -835,7 +848,7 @@ function setStatus(kind, text, bannerText) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//   Render — scan data (global KPIs, governance, overview, all 4 non-aborig panels)
+//   Render — scan data
 // ═══════════════════════════════════════════════════════════════════════════
 
 function entityBy(key) {
@@ -848,9 +861,7 @@ function renderGlobalKPIs() {
     if (!state.scan) return;
     const entities = state.scan.entitySummaries;
 
-    // Sum governance totals across all entities. The new server response
-    // includes draftCount, draftValue, onApprovalCount, onApprovalValue on
-    // each entity — plus the old statusCounts for reject/cancel rollup.
+    // Sum governance totals across all entities.
     const totals = entities.reduce((acc, e) => {
         acc.posTotal += (e.posTotal || 0);
         acc.totalValue += (e.totalValue || 0);
@@ -871,12 +882,18 @@ function renderGlobalKPIs() {
     });
 
     const rejCan = totals.rejected + totals.cancelled;
+    // Non-draft PO count. "Total POs" on the dashboard means decided POs —
+    // approved, onApproval, rejected, cancelled, or any edge status. Drafts
+    // are abandoned form state and are subtracted out. This gives a
+    // consistent denominator for Approved % that reflects real procurement
+    // activity (e.g. 3,761 / 3,812 = 99% rather than 3,761 / 4,178 = 90%).
+    const nonDraftPosTotal = totals.posTotal - totals.draftCount;
 
     document.getElementById('kpiCommitted').textContent = moneyK(totals.totalValue);
     document.getElementById('kpiEntityCount').textContent = entities.length;
-    document.getElementById('kpiTotalPos').textContent = num(totals.posTotal);
+    document.getElementById('kpiTotalPos').textContent = num(nonDraftPosTotal);
     document.getElementById('kpiApproved').textContent = num(totals.approved);
-    document.getElementById('kpiApprovedPct').textContent = pct(totals.approved / totals.posTotal);
+    document.getElementById('kpiApprovedPct').textContent = pct(totals.approved / nonDraftPosTotal);
     document.getElementById('kpiOnApproval').textContent = num(totals.onApprovalCount);
     document.getElementById('kpiOnApprovalSub').textContent = moneyK(totals.onApprovalValue) + ' awaiting sign-off';
     document.getElementById('kpiRejCan').textContent = num(rejCan);
@@ -887,16 +904,15 @@ function renderGlobalKPIs() {
     document.getElementById('govDraftValue').textContent = moneyK(totals.draftValue);
     document.getElementById('govRejCanTotal').textContent = num(rejCan);
 
-    // Entity tabs meta — show POs committed ($value) for quick orientation.
-    // posTotal shown is the full PO count (all statuses) so tab counts
-    // line up with what people see when they log into AM directly.
+    // Entity tabs meta — show non-draft PO count + committed $value so tab
+    // counts match the "Total POs" definition used elsewhere. All entities
+    // tab shows grand total of non-draft POs.
     const renderTabMeta = (key, elId) => {
         const e = entityBy(key);
         if (!e) return;
-        const posStr = (e.capped ? e.posTotal + '+' : e.posTotal);
-        document.getElementById(elId).textContent = posStr + ' POs · ' + moneyK(e.totalValue);
+        document.getElementById(elId).textContent = nonDraftCountDisplay(e) + ' POs · ' + moneyK(e.totalValue);
     };
-    document.getElementById('tabMetaAll').textContent = entities.length + ' ORGS · ' + num(totals.posTotal) + ' POs';
+    document.getElementById('tabMetaAll').textContent = entities.length + ' ORGS · ' + num(nonDraftPosTotal) + ' POs';
     renderTabMeta('aborig', 'tabMetaAborig');
     renderTabMeta('enterprises', 'tabMetaEnterprises');
     renderTabMeta('rpmms', 'tabMetaRpmms');
@@ -906,9 +922,10 @@ function renderGlobalKPIs() {
 
 function renderGovernance() {
     if (!state.scan) return;
-    // Per-entity draft count + $value. Uses new server fields (draftCount,
-    // draftValue) rather than statusCounts.draft. Adds "clean" CSS class
-    // when an entity has zero drafts so it renders green instead of amber.
+    // Per-entity draft count + $value. The "X% draft" figure is computed
+    // against the entity's full posTotal (including drafts) — it's the
+    // "what proportion of everything AM tracks is still in draft state"
+    // metric, a pure hygiene signal. Clean (zero drafts) renders green.
     const fill = (key, valId, subId, pctId, metricWrapperId) => {
         const e = entityBy(key);
         if (!e) return;
@@ -932,15 +949,15 @@ function renderGovernance() {
 
 function renderOverviewPanel() {
     if (!state.scan) return;
+    // Overview entity cards: committed $value + non-draft PO count + unique
+    // suppliers (from financial pool). All three honest: what's been
+    // committed, how many real POs drove it, how many suppliers it spread
+    // across.
     const fill = (key, valId, subId) => {
         const e = entityBy(key);
         if (!e) return;
-        // Overview entity cards show committed $ (financial) + full PO count
-        // so users see the committed figure alongside total activity. Number
-        // of suppliers reflects the filtered (financial) set — "real" suppliers.
-        const posStr = e.capped ? e.posTotal + '+' : num(e.posTotal);
         document.getElementById(valId).textContent = moneyK(e.totalValue);
-        document.getElementById(subId).textContent = posStr + ' POs · ' + (e.uniqueSuppliers || '—') + ' suppliers';
+        document.getElementById(subId).textContent = nonDraftCountDisplay(e) + ' POs · ' + (e.uniqueSuppliers || '—') + ' suppliers';
     };
     fill('aborig', 'oeAborigVal', 'oeAborigSub');
     fill('enterprises', 'oeEntVal', 'oeEntSub');
@@ -948,11 +965,10 @@ function renderOverviewPanel() {
     fill('mining', 'oeMiningVal', 'oeMiningSub');
     fill('invest', 'oeInvestVal', 'oeInvestSub');
 
-    // Top suppliers across the corporation (flatten + sort + top 10).
-    // The backend now excludes drafts from supplierTotals so "Unknown"
-    // should no longer appear here. The old "|| 'Unknown'" fallback has
-    // been changed to "(blank)" for the rare post-filter case, so any
-    // surviving blanks are honestly labelled.
+    // Top suppliers table — sourced from the server's financial-pool
+    // aggregation, so drafts are already excluded. "(blank)" fallback
+    // survives only if a truly blank supplier appears in the approved/
+    // onApproval pool, which should be very rare.
     const all = [];
     state.scan.entitySummaries.forEach(e => {
         const key = COMPANY_ID_TO_KEY[e.companyId];
@@ -979,8 +995,6 @@ function renderOverviewPanel() {
             '</tr>';
     }).join('');
 
-    // Spend concentration (top supplier share per entity).
-    // Uses financial totalValue as denominator, not full total.
     const concEntries = state.scan.entitySummaries.map(e => {
         const key = COMPANY_ID_TO_KEY[e.companyId];
         const topSup = (e.topSuppliersByValue || [])[0];
@@ -1000,7 +1014,6 @@ function renderOverviewPanel() {
             '<div class="conc-bar"><div class="conc-bar-fill" style="width: ' + pctNum + '%"></div></div>';
     }).join('');
 
-    // Intercompany flow detection (suppliers named like Rirratjingu *)
     const intercompany = [];
     state.scan.entitySummaries.forEach(e => {
         const key = COMPANY_ID_TO_KEY[e.companyId];
@@ -1021,11 +1034,6 @@ function renderOverviewPanel() {
     }
 }
 
-// Helper: render the "Drafts parked" quickstat line on an entity panel.
-// 0 drafts = green (clean); >0 drafts = amber/red per entity's historical
-// colour style. The element's inline style.color was set on the HTML
-// template for entities that tend to have drafts; for the zero case we
-// override to the moss green to celebrate a clean slate.
 function renderDraftQuickstat(draftCount, draftValue, elementId) {
     const el = document.getElementById(elementId);
     if (!el) return;
@@ -1034,8 +1042,6 @@ function renderDraftQuickstat(draftCount, draftValue, elementId) {
         el.style.color = 'var(--moss)';
     } else {
         el.textContent = num(draftCount) + ' (' + moneyK(draftValue) + ')';
-        // Keep the warning colour set in the HTML template. If no inline
-        // colour set (i.e. originally clean), ochre is a safe default.
         if (!el.style.color || el.style.color === 'var(--moss)') {
             el.style.color = 'var(--ochre)';
         }
@@ -1048,7 +1054,10 @@ function renderEntityPanel(key, prefix) {
 
     const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
     set(prefix + 'Ytd', moneyK(e.totalValue));
-    set(prefix + 'Pos', (e.capped ? e.posTotal + '+' : num(e.posTotal)));
+    // "Total POs" on each entity panel is the non-draft count, for
+    // consistency with the top-level KPI. Drafts live only in the
+    // "Drafts parked" row immediately below and in the governance drawer.
+    set(prefix + 'Pos', nonDraftCountDisplay(e));
     renderDraftQuickstat(e.draftCount || 0, e.draftValue || 0, prefix + 'Drafts');
     set(prefix + 'Suppliers', num(e.uniqueSuppliers));
     set(prefix + 'Accounts', num(e.uniqueAccountCodes));
@@ -1059,16 +1068,13 @@ function renderEnterprisesPanel() {
     if (!e) return;
     renderEntityPanel('enterprises', 'ent');
 
-    // Top supplier share
     const topSup = (e.topSuppliersByValue || [])[0];
     if (topSup && e.totalValue) {
         document.getElementById('entTopShare').textContent = Math.round((topSup.total / e.totalValue) * 100) + '%';
     }
 
-    // Standfirst dynamic
     document.getElementById('entStandValue').textContent = moneyK(e.totalValue);
 
-    // Top suppliers table
     const suppliers = (e.topSuppliersByValue || []).slice(0, 5);
     document.getElementById('entSuppliersBody').innerHTML = suppliers.map(s => {
         const avg = s.poCount > 0 ? moneyK(s.total / s.poCount) : '—';
@@ -1080,10 +1086,6 @@ function renderEnterprisesPanel() {
             '<td class="num">' + moneyFull(s.total) + '</td></tr>';
     }).join('');
 
-    // Blank-supplier flag — only shown if the filtered financial pool
-    // still contains a "(blank)" supplier. Under the new rules this should
-    // be rare (blanks cluster in drafts, which are excluded), so presence
-    // here is a genuine exception worth flagging.
     const blankSupplier = (e.topSuppliersByValue || []).find(s => s.name === '(blank)');
     const flagEl = document.getElementById('entBlankFlag');
     if (blankSupplier && flagEl) {
@@ -1094,7 +1096,6 @@ function renderEnterprisesPanel() {
         flagEl.style.display = 'none';
     }
 
-    // Accounts table
     const accounts = (e.topAccountsByValue || []).slice(0, 5);
     document.getElementById('entAccountsBody').innerHTML = accounts.map(a => {
         return '<tr><td class="supplier-name">' + escapeHtml(a.account || a.accountCode) + '</td>' +
@@ -1108,7 +1109,9 @@ function renderRpmmsPanel() {
     if (!e) return;
     renderEntityPanel('rpmms', 'rpmms');
 
-    document.getElementById('rpmmsStandPos').textContent = num(e.posTotal);
+    // Standfirst PO count — also non-draft so the narrative matches the
+    // quickstat "Total POs" immediately to its right.
+    document.getElementById('rpmmsStandPos').textContent = num(nonDraftCount(e));
 
     const suppliers = (e.topSuppliersByValue || []).slice(0, 5);
     document.getElementById('rpmmsSuppliersBody').innerHTML = suppliers.map(s => {
@@ -1130,7 +1133,6 @@ function renderMiningPanel() {
     if (!e) return;
     renderEntityPanel('mining', 'mining');
 
-    // Fuel share (account starting with 510 = fuel)
     const fuelAccount = (e.topAccountsByValue || []).find(a => (a.account || '').toLowerCase().includes('fuel'));
     if (fuelAccount && e.totalValue) {
         document.getElementById('miningFuelShare').textContent = Math.round((fuelAccount.total / e.totalValue) * 100) + '%';
@@ -1138,7 +1140,6 @@ function renderMiningPanel() {
         document.getElementById('miningFuelShare').textContent = '—';
     }
 
-    // Standfirst: repair PO count
     const repairsAccount = (e.topAccountsByValue || []).find(a => /repair/i.test(a.account || ''));
     document.getElementById('miningStandRepairs').textContent = repairsAccount ? num(repairsAccount.poCount) : '—';
 
@@ -1164,10 +1165,10 @@ function renderInvestPanel() {
     if (!e) return;
     renderEntityPanel('invest', 'invest');
 
-    document.getElementById('investStandPos').textContent = num(e.posTotal);
+    // Standfirst PO count — non-draft, matching quickstat.
+    document.getElementById('investStandPos').textContent = num(nonDraftCount(e));
     document.getElementById('investStandValue').textContent = moneyK(e.totalValue);
 
-    // Biggest PO = biggest single-PO supplier total (heuristic)
     const biggest = (e.topSuppliersByValue || []).reduce((best, s) => {
         const avg = s.poCount > 0 ? s.total / s.poCount : 0;
         return avg > best ? avg : best;
@@ -1191,14 +1192,13 @@ function renderInvestPanel() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//   Render — welfare data (Aboriginal Corp panel) [unchanged from prior]
+//   Render — welfare data (Aboriginal Corp panel)
 // ═══════════════════════════════════════════════════════════════════════════
 
 function renderAborigPanel() {
     if (!state.welfare) return;
     const w = state.welfare;
 
-    // Quickstats + standfirst
     document.getElementById('aborigStandWelfareValue').textContent = moneyK(w.totalWelfareValue);
     document.getElementById('aborigStandWelfarePos').textContent = num(w.totalWelfarePOs);
 
@@ -1220,7 +1220,6 @@ function renderAborigPanel() {
     vsEl.textContent = (deltaPct >= 0 ? '+' : '') + deltaPct + '%';
     vsEl.style.color = deltaPct < -15 ? 'var(--ochre)' : deltaPct > 15 ? 'var(--terra)' : 'var(--moss)';
 
-    // Welfare categories grid — 6 cards covering the visible categories
     const visibleCategoryNames = [
         'Family Charitable Payments',
         'Transport Assistance',
@@ -1319,7 +1318,7 @@ function renderAborigPanel() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//   Render — budget vs actual (FY26 Xero, per-entity cards) [unchanged]
+//   Render — budget vs actual
 // ═══════════════════════════════════════════════════════════════════════════
 
 function renderBudgetCards() {
