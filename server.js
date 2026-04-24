@@ -6,7 +6,11 @@ const fetch = require('node-fetch');
 const { Pool } = require('pg');
 const amClient = require('./approvalmax-client');
 const welfare = require('./welfare-categoriser');
-const { handleBudgetVsActual, makeUnknownReconciliationHandler } = require('./xero-proxy');
+const {
+    handleBudgetVsActual,
+    makeUnknownReconciliationHandler,
+    makeDraftCleanupHandler
+} = require('./xero-proxy');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -342,6 +346,18 @@ app.get('/api/budget-vs-actual', handleBudgetVsActual);
 // query params and response shape. Handler is a factory because it needs
 // our AM client + pagination helpers, which live in this file.
 app.get('/api/unknown-reconciliation', makeUnknownReconciliationHandler({
+    amClient,
+    fetchAllPages,
+    requireToken,
+    maxPages: MAX_PAGES_FOR_ENTITY_SCAN
+}));
+
+// /api/draft-cleanup — operational worklist of blank-supplier draft POs
+// with auto-suggested action (Delete if >staleDays old, Follow-up
+// otherwise). Supports JSON (default) and ?format=csv for Excel download.
+// See xero-proxy.js for full query-param and column documentation.
+// Same DI pattern as unknown-reconciliation above.
+app.get('/api/draft-cleanup', makeDraftCleanupHandler({
     amClient,
     fetchAllPages,
     requireToken,
