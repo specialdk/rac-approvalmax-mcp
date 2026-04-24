@@ -64,6 +64,21 @@ const MAX_PAGES_FOR_WELFARE = 35;  // 3,500 records max
 // are expected to have far fewer POs.
 const MAX_PAGES_FOR_ENTITY_SCAN = 30;
 
+// Statuses that represent genuine procurement intent / commitment at RAC.
+// AM at RAC operates as a visibility and compliance layer over decisions the
+// business has already made; rejection is rare and usually corrective
+// (wrong entity, re-raise) rather than a real veto. So both approved and
+// onApproval are included in committed-spend figures.
+//
+// Drafts are treated as intent-only and excluded from financial totals —
+// AM auto-saves partial form state when a user abandons a PO (no explicit
+// "discard" action), producing a long tail of zero/low-value abandoned
+// records that inflate "Unknown supplier" in the old aggregate view.
+// Rejected and cancelled are dead records and also excluded.
+//
+// See dashboard methodology caption for the user-facing explanation.
+const FINANCIAL_STATUSES = new Set(['approved', 'onApproval']);
+
 // Helper: pull the three new filter params from a request's query string in one go.
 // Returns { createdAtOrAfter, orderBy, orderDirection } with undefineds for absent values.
 function extractAnalysisFilters(query) {
@@ -130,28 +145,73 @@ async function fetchAllPages(accessToken, companyId, xeroType, baseFilters, page
     return { items: allItems, pages, capped };
 }
 
-// Helper (Day 3g): given an array of POs, return aggregate shape data —
-// total $ value, status breakdown, top 5 suppliers by $, top 5 account codes
-// by $ and poCount, earliest/latest date seen. Purpose is to give a one-shot
-// "what does this entity's AM data look like" snapshot to inform dashboard
-// design. Does NOT do welfare-category classification — that's a separate
-// concern specific to Aboriginal Corp.
+// Helper (Day 3g, revised Day 4): given an array of POs, return aggregate
+// shape data. Split into two passes:
+//
+//   - Financial pass: sums $, supplier totals, account totals across POs
+//     whose requestStatus is in FINANCIAL_STATUSES (approved, onApproval).
+//     Drives all committed-spend-facing cards on the dashboard.
+//
+//   - Governance pass: counts all POs by status regardless of financial
+//     inclusion. Sums dollar value of drafts separately so the governance
+//     drawer can show "$X parked in drafts — not counted in committed".
+//
+// Changes vs original summarisePosShape:
+//   - totalValue now excludes draft/rejected/cancelled
+//   - supplierTotals / accountTotals exclude same → no more fake "Unknown" row
+//     driven by 75+ blank-supplier drafts in Enterprises etc.
+//   - statusCounts still covers all statuses for the governance drawer
+//   - New fields: financialPosCount, draftValue, onApprovalValue
+//   - posTotal stays = full count (dashboard KPI "Total POs" unchanged)
 function summarisePosShape(pos) {
-    let totalValue = 0;
+    // --- Governance pass: every PO, status counts + draft-value tally ---
     const statusCounts = {};
-    const supplierCounts = {};
-    const supplierTotals = {};
-    const accountTotals = {};
+    let draftValue = 0;
+    let draftCount = 0;
+    let onApprovalValue = 0;
+    let onApprovalCount = 0;
     let earliestDate = null;
     let latestDate = null;
 
     for (const po of pos) {
-        totalValue += (po.total || 0);
-
         const status = po.requestStatus || 'unknown';
         statusCounts[status] = (statusCounts[status] || 0) + 1;
 
-        const supplier = po.contact || 'Unknown';
+        if (status === 'draft') {
+            draftCount += 1;
+            draftValue += (po.total || 0);
+        } else if (status === 'onApproval') {
+            onApprovalCount += 1;
+            onApprovalValue += (po.total || 0);
+        }
+
+        const poDate = po.createdAt || po.date || po.modifiedAt || null;
+        if (poDate) {
+            if (!earliestDate || poDate < earliestDate) earliestDate = poDate;
+            if (!latestDate || poDate > latestDate) latestDate = poDate;
+        }
+    }
+
+    // --- Financial pass: approved + onApproval only ---
+    let totalValue = 0;
+    let financialPosCount = 0;
+    const supplierCounts = {};
+    const supplierTotals = {};
+    const accountTotals = {};
+
+    for (const po of pos) {
+        const status = po.requestStatus || 'unknown';
+        if (!FINANCIAL_STATUSES.has(status)) continue;
+
+        financialPosCount += 1;
+        totalValue += (po.total || 0);
+
+        // Supplier aggregation. The old code had `po.contact || 'Unknown'`
+        // which converted every blank-supplier PO into a phantom "Unknown"
+        // supplier. Now that drafts (where blanks cluster) are excluded,
+        // blanks in the remaining pool are rare and we keep the fallback
+        // label so they still surface if they exist.
+        const supplier = po.contact || '(blank)';
         supplierTotals[supplier] = (supplierTotals[supplier] || 0) + (po.total || 0);
         supplierCounts[supplier] = (supplierCounts[supplier] || 0) + 1;
 
@@ -170,12 +230,6 @@ function summarisePosShape(pos) {
                 accountTotals[code].total += (li.amount || 0);
                 accountTotals[code].poCount += 1;
             }
-        }
-
-        const poDate = po.createdAt || po.date || po.modifiedAt || null;
-        if (poDate) {
-            if (!earliestDate || poDate < earliestDate) earliestDate = poDate;
-            if (!latestDate || poDate > latestDate) latestDate = poDate;
         }
     }
 
@@ -201,14 +255,24 @@ function summarisePosShape(pos) {
         }));
 
     return {
+        // Financial figures (committed/spend) — approved + onApproval only
         totalValue: r2(totalValue),
-        statusCounts,
+        financialPosCount,
         topSuppliersByValue,
         topAccountsByValue,
-        earliestDate,
-        latestDate,
         uniqueSuppliers: Object.keys(supplierTotals).length,
-        uniqueAccountCodes: Object.keys(accountTotals).length
+        uniqueAccountCodes: Object.keys(accountTotals).length,
+
+        // Governance figures — all statuses
+        statusCounts,
+        draftCount,
+        draftValue: r2(draftValue),
+        onApprovalCount,
+        onApprovalValue: r2(onApprovalValue),
+
+        // Date span covers everything fetched, not just financials
+        earliestDate,
+        latestDate
     };
 }
 
@@ -533,143 +597,9 @@ app.get('/', (req, res) => {
             <button onclick="startAuth()">Start ApprovalMax Authentication</button>
             <div id="authResult"></div>
         </div>
-
-        <div class="section scan">
-            <h3>Cross-Entity Reconnaissance (Day 3g)</h3>
-            <p style="color: #64748b; font-size: 13px;">
-                One-shot scan of all 7 entities. For each: total PO count &amp; $, top 5 suppliers, top 5 account codes,
-                status breakdown, date range. Purpose: inform dashboard design decisions about which entities need
-                dedicated views and what the dominant procurement "story" is for each.
-            </p>
-            <div class="button-grid">
-                <button onclick="fetchEntityScan()" disabled id="btn-entity-scan" class="scan-btn">Run entity scan (all 7 orgs, post-AM-era)</button>
-            </div>
-            <div id="entityScanResult"></div>
-        </div>
-
-        <div class="section welfare">
-            <h3>Aboriginal Corp — "We Provided" view (prototype)</h3>
-            <p style="color: #64748b; font-size: 13px;">
-                BAU procurement visibility for welfare payments. Structured to tell the Annual Report story in real time.
-                Major project spend is managed outside AM and reported separately.
-            </p>
-
-            <div class="control-row">
-                <label for="welfareFyStart">FY start:</label>
-                <input type="date" id="welfareFyStart" value="${DEFAULT_WELFARE_FY_START}">
-                <small style="width: 100%; color: #64748b; margin-top: 4px;">
-                    Default <code>${DEFAULT_WELFARE_FY_START}</code> is FY26 start. Use <code>2024-07-01</code> for FY25 comparison.
-                </small>
-            </div>
-
-            <div class="button-grid">
-                <button onclick="fetchWelfareView()" disabled id="btn-welfare">Build "We Provided" view</button>
-            </div>
-
-            <div id="welfareFilterSummary"></div>
-            <div id="welfareCappedWarning"></div>
-            <div id="welfareKpiRow"></div>
-            <div id="welfareCategories"></div>
-            <div id="welfareResult"></div>
-        </div>
-
-        <div class="section">
-            <h3>Step 2: Xero Request Data (raw / sampling)</h3>
-            <p>Hits the real AM endpoints: <code>/api/v1/companies/{id}/xero/{type}</code></p>
-
-            <div class="control-row">
-                <label for="typePicker">Request type:</label>
-                <select id="typePicker">
-                    <option value="purchase-orders" selected>purchase-orders</option>
-                    <option value="bills">bills</option>
-                    <option value="credit-notes">credit-notes</option>
-                    <option value="sales-invoices">sales-invoices</option>
-                    <option value="batch-payments">batch-payments</option>
-                    <option value="quotes">quotes</option>
-                </select>
-            </div>
-
-            <div class="control-row">
-                <label for="statusPicker">Request status:</label>
-                <select id="statusPicker">
-                    <option value="" selected>(no filter - all statuses)</option>
-                    <option value="approved">approved (confirmed)</option>
-                    <option value="onApproval">onApproval (guess)</option>
-                    <option value="rejected">rejected (guess)</option>
-                    <option value="draft">draft (guess)</option>
-                    <option value="cancelled">cancelled (guess)</option>
-                    <option value="submitted">submitted (guess)</option>
-                </select>
-            </div>
-
-            <div class="control-row">
-                <label for="createdAtOrAfterPicker">Created on or after:</label>
-                <input type="date" id="createdAtOrAfterPicker" value="${DEFAULT_AM_ERA_CUTOFF}">
-                <small style="width: 100%; color: #64748b; margin-top: 4px;">
-                    Default <code>${DEFAULT_AM_ERA_CUTOFF}</code> skips pre-AM backfill records. Clear the date to include everything (incl. backfill).
-                </small>
-            </div>
-
-            <div class="control-row">
-                <label for="sortPicker">Sort:</label>
-                <select id="sortPicker">
-                    <option value="" selected>(no sort - AM default)</option>
-                    <option value="CreatedAt|Desc">CreatedAt Desc (guess - REJECTED by AM)</option>
-                    <option value="ModifiedAt|Desc">ModifiedAt Desc (guess)</option>
-                    <option value="DecisionDate|Desc">DecisionDate Desc (guess)</option>
-                    <option value="Date|Desc">Date Desc (guess)</option>
-                </select>
-                <small style="width: 100%; color: #64748b; margin-top: 4px;">
-                    OrderBy enum unknown. Both 'createdAt' and 'CreatedAt' rejected. Parked for now.
-                </small>
-            </div>
-
-            <div class="control-row">
-                <label for="companyPicker">Entity:</label>
-                <select id="companyPicker">
-                    <option value="">(all entities)</option>
-                </select>
-            </div>
-
-            <div class="control-row">
-                <label for="limitPicker">Limit per page:</label>
-                <select id="limitPicker">
-                    <option value="3">3 (sampling)</option>
-                    <option value="5" selected>5 (sampling, default)</option>
-                    <option value="10">10</option>
-                    <option value="25">25</option>
-                    <option value="50">50</option>
-                    <option value="100">100 (AM max)</option>
-                </select>
-                <small style="width: 100%; color: #64748b; margin-top: 4px;">
-                    Small = easier to read one page of JSON when sampling. 100 = AM's maximum per request. Only affects "Fetch by type" — cross-entity summary paginates for true counts regardless.
-                </small>
-            </div>
-
-            <h4>Actions</h4>
-            <div class="button-grid">
-                <button onclick="callApi('/api/companies')" disabled id="btn-api-companies">GET /api/companies</button>
-                <button onclick="fetchCrossEntitySummary()" disabled id="btn-summary">Cross-entity summary (POs + Bills, all 5 orgs)</button>
-                <button onclick="fetchXeroByType()" disabled id="btn-xero-type">Fetch by type (uses selectors above)</button>
-            </div>
-
-            <div id="filterSummary"></div>
-            <div id="cappedWarning"></div>
-            <div id="kpiRow"></div>
-            <div id="apiResult"></div>
-        </div>
-
-        <div class="section">
-            <h3>Debug</h3>
-            <button onclick="showDebugInfo()">Show DB Token State</button>
-            <div id="debugInfo"></div>
-        </div>
     </div>
 
     <script>
-        let isAuthenticated = false;
-        let companies = [];
-
         function startAuth() {
             fetch('/auth/start')
                 .then(r => r.json())
@@ -689,281 +619,6 @@ app.get('/', (req, res) => {
                 });
         }
 
-        function buildFilterParams() {
-            const parts = [];
-            const status = document.getElementById('statusPicker').value;
-            if (status) parts.push('requestStatus=' + encodeURIComponent(status));
-
-            const createdAtOrAfter = document.getElementById('createdAtOrAfterPicker').value;
-            if (createdAtOrAfter) parts.push('createdAtOrAfter=' + encodeURIComponent(createdAtOrAfter));
-
-            const sortValue = document.getElementById('sortPicker').value;
-            if (sortValue) {
-                const [orderBy, orderDirection] = sortValue.split('|');
-                if (orderBy) parts.push('orderBy=' + encodeURIComponent(orderBy));
-                if (orderDirection) parts.push('orderDirection=' + encodeURIComponent(orderDirection));
-            }
-
-            return parts.join('&');
-        }
-
-        function renderFilterSummary() {
-            const status = document.getElementById('statusPicker').value || '(all statuses)';
-            const createdAtOrAfter = document.getElementById('createdAtOrAfterPicker').value || '(no date filter — includes backfill)';
-            const sortValue = document.getElementById('sortPicker').value;
-            let sortLabel = '(no sort)';
-            if (sortValue) {
-                const [orderBy, orderDirection] = sortValue.split('|');
-                sortLabel = orderBy + ' ' + orderDirection;
-            }
-            const limit = document.getElementById('limitPicker').value || '5';
-            document.getElementById('filterSummary').innerHTML =
-                '<div class="filter-summary">Filters: status=<strong>' + status +
-                '</strong>, createdAtOrAfter=<strong>' + createdAtOrAfter +
-                '</strong>, sort=<strong>' + sortLabel +
-                '</strong>, limit/page=<strong>' + limit + '</strong></div>';
-        }
-
-        function renderCappedWarning(data) {
-            const cappedEl = document.getElementById('cappedWarning');
-            if (!cappedEl) return;
-            if (data && data.anyCapped) {
-                const cappedCombos = [];
-                (data.byCompany || []).forEach(c => {
-                    (c.cappedTypes || []).forEach(t => cappedCombos.push(c.companyName + ' / ' + t));
-                });
-                cappedEl.innerHTML =
-                    '<div class="capped-warning">⚠️ Pagination cap reached (' +
-                    data.paginationCap + ' pages × 100 = ' + (data.paginationCap * 100) + ' records) for: <strong>' +
-                    cappedCombos.join(', ') + '</strong>. True counts may be higher.</div>';
-            } else {
-                cappedEl.innerHTML = '';
-            }
-        }
-
-        function callApi(path) {
-            showLoading('apiResult');
-            document.getElementById('kpiRow').innerHTML = '';
-            document.getElementById('cappedWarning').innerHTML = '';
-            fetch(path)
-                .then(r => r.json())
-                .then(data => {
-                    document.getElementById('apiResult').innerHTML =
-                        '<div class="result">' + JSON.stringify(data, null, 2) + '</div>';
-                })
-                .catch(err => {
-                    document.getElementById('apiResult').innerHTML =
-                        '<div class="status disconnected">Error: ' + err.message + '</div>';
-                });
-        }
-
-        function fetchXeroByType() {
-            const type = document.getElementById('typePicker').value;
-            const companyId = document.getElementById('companyPicker').value;
-            const limit = document.getElementById('limitPicker').value || '5';
-            const filterParams = buildFilterParams();
-            const basePath = companyId
-                ? '/api/xero/' + type + '/' + companyId
-                : '/api/xero/' + type;
-            const qs = 'limit=' + encodeURIComponent(limit) + (filterParams ? '&' + filterParams : '');
-            renderFilterSummary();
-            callApi(basePath + '?' + qs);
-        }
-
-        function fetchCrossEntitySummary() {
-            const filterParams = buildFilterParams();
-            const qs = filterParams ? '?' + filterParams : '';
-            renderFilterSummary();
-            showLoading('apiResult');
-            document.getElementById('kpiRow').innerHTML = '';
-            document.getElementById('cappedWarning').innerHTML = '';
-            fetch('/api/xero/summary' + qs)
-                .then(r => r.json())
-                .then(data => {
-                    renderSummaryKPIs(data);
-                    renderCappedWarning(data);
-                    document.getElementById('apiResult').innerHTML =
-                        '<div class="result">' + JSON.stringify(data, null, 2) + '</div>';
-                })
-                .catch(err => {
-                    document.getElementById('apiResult').innerHTML =
-                        '<div class="status disconnected">Error: ' + err.message + '</div>';
-                });
-        }
-
-        function fetchEntityScan() {
-            document.getElementById('entityScanResult').innerHTML =
-                '<div class="status pending">Scanning all 7 entities... this pulls POs with line items so expect 60–180 seconds.</div>';
-            fetch('/api/am/entity-scan')
-                .then(r => r.json())
-                .then(data => {
-                    document.getElementById('entityScanResult').innerHTML =
-                        '<div class="result">' + JSON.stringify(data, null, 2) + '</div>';
-                })
-                .catch(err => {
-                    document.getElementById('entityScanResult').innerHTML =
-                        '<div class="status disconnected">Error: ' + err.message + '</div>';
-                });
-        }
-
-        function renderSummaryKPIs(data) {
-            if (!data || !data.success) return;
-            const html =
-                '<div class="kpi-row">' +
-                '<div class="kpi-card"><div class="num">' + (data.totalCount || 0) + '</div><div class="label">Total (' + data.requestStatus + ')</div></div>' +
-                '<div class="kpi-card"><div class="num">' + (data.totalsByType?.['purchase-orders'] || 0) + '</div><div class="label">Purchase Orders</div></div>' +
-                '<div class="kpi-card"><div class="num">' + (data.totalsByType?.['bills'] || 0) + '</div><div class="label">Bills</div></div>' +
-                '<div class="kpi-card"><div class="num">' + (data.entityCount || 0) + '</div><div class="label">Entities</div></div>' +
-                '</div>';
-            document.getElementById('kpiRow').innerHTML = html;
-        }
-
-        // ──── Welfare view ────
-        function fetchWelfareView() {
-            const fyStart = document.getElementById('welfareFyStart').value || '${DEFAULT_WELFARE_FY_START}';
-            document.getElementById('welfareFilterSummary').innerHTML =
-                '<div class="filter-summary">FY start: <strong>' + fyStart + '</strong>. Fetching all Aboriginal Corp POs (this may take 15-30 seconds due to pagination)...</div>';
-            document.getElementById('welfareKpiRow').innerHTML = '';
-            document.getElementById('welfareCategories').innerHTML = '';
-            document.getElementById('welfareCappedWarning').innerHTML = '';
-            document.getElementById('welfareResult').innerHTML =
-                '<div class="status pending">Loading welfare view...</div>';
-
-            fetch('/api/welfare/aboriginal-corp?fyStart=' + encodeURIComponent(fyStart))
-                .then(r => r.json())
-                .then(data => {
-                    if (!data.success) {
-                        document.getElementById('welfareResult').innerHTML =
-                            '<div class="status disconnected">Error: ' + (data.error || 'unknown') + '</div>';
-                        return;
-                    }
-                    renderWelfareKPIs(data.summary);
-                    renderWelfareCategories(data.summary);
-                    if (data.capped) {
-                        document.getElementById('welfareCappedWarning').innerHTML =
-                            '<div class="capped-warning">⚠️ Fetched ' + data.pagesFetched + ' pages (' + data.summary.posInspected + ' POs). Hit pagination cap — there may be more POs not included.</div>';
-                    }
-                    document.getElementById('welfareResult').innerHTML =
-                        '<details><summary style="cursor: pointer; color: #6A4C93; margin-top: 10px;">Show raw JSON</summary>' +
-                        '<div class="result">' + JSON.stringify(data, null, 2) + '</div></details>';
-                })
-                .catch(err => {
-                    document.getElementById('welfareResult').innerHTML =
-                        '<div class="status disconnected">Error: ' + err.message + '</div>';
-                });
-        }
-
-        function renderWelfareKPIs(summary) {
-            const html =
-                '<div class="kpi-row">' +
-                '<div class="kpi-card"><div class="num">$' + formatMoney(summary.totalWelfareValue) + '</div><div class="label">YTD Welfare Spend</div></div>' +
-                '<div class="kpi-card"><div class="num">' + summary.totalWelfarePOs + '</div><div class="label">Welfare POs (YTD)</div></div>' +
-                '<div class="kpi-card"><div class="num">' + summary.totalWelfareYtdVsFy25Pct + '%</div><div class="label">Of FY25 total</div></div>' +
-                '<div class="kpi-card"><div class="num">' + Math.round(summary.fyPaceFraction * 100) + '%</div><div class="label">Of FY elapsed</div></div>' +
-                '</div>';
-            document.getElementById('welfareKpiRow').innerHTML = html;
-        }
-
-        function renderWelfareCategories(summary) {
-            const html = summary.categories.map(cat => {
-                const isUncat = cat.arLine === 'Uncategorised';
-                const ytd = '$' + formatMoney(cat.ytdTotal);
-                const baseline = cat.fy25Baseline ? '$' + formatMoney(cat.fy25Baseline) : '—';
-
-                let paceHtml = '';
-                if (cat.fy25Baseline && cat.projectedFullYear !== null) {
-                    const pct = cat.projectedVsBaseline;
-                    const paceClass = pct > 15 ? 'pace-over' : pct < -15 ? 'pace-under' : 'pace-on-track';
-                    const paceWord = pct > 15 ? 'ahead of' : pct < -15 ? 'behind' : 'on track with';
-                    paceHtml = '<div class="ar-caption ' + paceClass + '">' +
-                        'Projected full-year: $' + formatMoney(cat.projectedFullYear) +
-                        ' (' + (pct >= 0 ? '+' : '') + pct + '% vs FY25 baseline — ' + paceWord + ' last year)' +
-                        '</div>';
-                }
-
-                let sampleHtml = '';
-                if (isUncat && cat.sampleDescriptions && cat.sampleDescriptions.length > 0) {
-                    sampleHtml = '<details style="margin-top: 10px;"><summary style="cursor: pointer; color: #6A4C93;">Sample uncategorised POs (for rule tuning)</summary>' +
-                        '<ul style="font-size: 12px; color: #64748b;">' +
-                        cat.sampleDescriptions.map(s =>
-                            '<li><strong>' + (s.documentNumber || '(no #)') + '</strong> — ' + s.supplier + ' ($' + formatMoney(s.amount) + ', acct ' + (s.accountCode || '?') + '): <em>' + escapeHtml(s.description) + '</em></li>'
-                        ).join('') +
-                        '</ul></details>';
-                }
-
-                let recipientsHtml = '';
-                if (cat.topRecipients && cat.topRecipients.length > 0) {
-                    recipientsHtml = '<details style="margin-top: 8px;"><summary style="cursor: pointer; color: #6A4C93; font-size: 13px;">Top recipients (' + cat.uniqueRecipients + ' unique)</summary>' +
-                        '<ul style="font-size: 12px;">' +
-                        cat.topRecipients.map(r =>
-                            '<li>' + escapeHtml(r.name) + ' — $' + formatMoney(r.total) + ' across ' + r.poCount + ' POs</li>'
-                        ).join('') +
-                        '</ul></details>';
-                }
-
-                const pctOfBaseline = cat.ytdPercentOfBaseline !== undefined
-                    ? cat.ytdPercentOfBaseline + '%'
-                    : '—';
-
-                return '<div class="category-card">' +
-                    '<div class="cat-name">' + cat.arLine + (isUncat ? ' <span style="background: #fef3c7; padding: 2px 6px; border-radius: 3px; font-size: 11px;">needs tuning</span>' : '') + '</div>' +
-                    '<div class="cat-figures">' +
-                    '<div><div class="cat-fig-label">YTD</div><div class="cat-fig-value">' + ytd + '</div></div>' +
-                    '<div><div class="cat-fig-label">POs</div><div class="cat-fig-value">' + cat.ytdPOs + '</div></div>' +
-                    '<div><div class="cat-fig-label">FY25 Baseline</div><div class="cat-fig-value">' + baseline + '</div></div>' +
-                    '<div><div class="cat-fig-label">% of FY25</div><div class="cat-fig-value">' + pctOfBaseline + '</div></div>' +
-                    '</div>' +
-                    paceHtml +
-                    recipientsHtml +
-                    sampleHtml +
-                    '</div>';
-            }).join('');
-            document.getElementById('welfareCategories').innerHTML = html;
-        }
-
-        function formatMoney(n) {
-            if (n === null || n === undefined) return '—';
-            return Number(n).toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-        }
-
-        function escapeHtml(s) {
-            return String(s || '').replace(/[&<>"']/g, c => ({
-                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-            })[c]);
-        }
-
-        function showDebugInfo() {
-            fetch('/debug/info')
-                .then(r => r.json())
-                .then(data => {
-                    document.getElementById('debugInfo').innerHTML =
-                        '<div class="result">' + JSON.stringify(data, null, 2) + '</div>';
-                });
-        }
-
-        function showLoading(elementId) {
-            document.getElementById(elementId).innerHTML =
-                '<div class="status pending">Loading... (pagination may take 5-15 seconds)</div>';
-        }
-
-        function enableButtons() {
-            ['btn-api-companies', 'btn-summary', 'btn-xero-type', 'btn-welfare', 'btn-entity-scan'].forEach(id => {
-                const btn = document.getElementById(id);
-                if (btn) btn.disabled = false;
-            });
-        }
-
-        function populateCompanyPicker(orgs) {
-            const picker = document.getElementById('companyPicker');
-            picker.innerHTML = '<option value="">(all entities)</option>';
-            orgs.forEach(org => {
-                const opt = document.createElement('option');
-                opt.value = org.companyId || org.id;
-                opt.textContent = org.name;
-                picker.appendChild(opt);
-            });
-        }
-
         fetch('/auth/status')
             .then(r => r.json())
             .then(data => {
@@ -973,18 +628,6 @@ app.get('/', (req, res) => {
                     document.getElementById('connectionStatus').className = 'status connected';
                     document.getElementById('tokenStatus').textContent =
                         'Valid - expires ' + (data.expiresAt ? new Date(data.expiresAt).toLocaleString() : 'unknown');
-                    enableButtons();
-                    isAuthenticated = true;
-
-                    fetch('/api/companies')
-                        .then(r => r.json())
-                        .then(response => {
-                            if (response.success && response.data) {
-                                companies = Array.isArray(response.data) ? response.data : [];
-                                populateCompanyPicker(companies);
-                            }
-                        })
-                        .catch(() => {});
                 } else {
                     document.getElementById('tokenStatus').textContent = 'No token in DB';
                 }
@@ -1112,12 +755,6 @@ app.get('/api/companies', async (req, res) => {
 });
 
 // GET /api/welfare/aboriginal-corp - the "We Provided" view prototype
-// Fetches all Aboriginal Corp POs from fyStart, classifies into AR welfare
-// categories, extracts recipients, returns dashboard-shaped payload.
-//
-// Query params:
-//   fyStart      - date (YYYY-MM-DD), defaults to 2025-07-01 (FY26 start)
-//   asOfDate     - date (YYYY-MM-DD), defaults to today, used for pace calc
 app.get('/api/welfare/aboriginal-corp', async (req, res) => {
     try {
         const tok = await requireToken();
@@ -1159,16 +796,7 @@ app.get('/api/welfare/aboriginal-corp', async (req, res) => {
     }
 });
 
-// GET /api/am/entity-scan - cross-entity reconnaissance (Day 3g)
-// For each connected AM company, paginates through POs (post-AM-era only by
-// default) and returns aggregate shape data per entity: total count, total $
-// value, top 5 suppliers by value, top 5 account codes by value, status
-// breakdown, earliest/latest date. Purpose: inform dashboard design
-// decisions about which entities justify dedicated views and what the
-// dominant procurement "story" is for each.
-//
-// Query params:
-//   createdAtOrAfter - date, defaults to DEFAULT_AM_ERA_CUTOFF (2025-06-01)
+// GET /api/am/entity-scan - cross-entity reconnaissance
 app.get('/api/am/entity-scan', async (req, res) => {
     try {
         const tok = await requireToken();
@@ -1196,7 +824,7 @@ app.get('/api/am/entity-scan', async (req, res) => {
                     MAX_PAGES_FOR_ENTITY_SCAN
                 );
                 const shape = summarisePosShape(pos);
-                console.log(`[entity-scan] ${companyName}: ${pos.length} POs, $${shape.totalValue}, ${pages} pages (capped=${capped})`);
+                console.log(`[entity-scan] ${companyName}: ${pos.length} POs, ${shape.financialPosCount} financial, $${shape.totalValue}, drafts=${shape.draftCount}($${shape.draftValue}), ${pages} pages (capped=${capped})`);
                 entitySummaries.push({
                     companyId,
                     companyName,
@@ -1236,8 +864,6 @@ app.get('/api/am/entity-scan', async (req, res) => {
 });
 
 // GET /api/xero/summary - cross-entity KPI summary (POs + Bills across all 5 orgs)
-// Now paginates through all continuationToken pages per (entity, type) for TRUE totals.
-// Query: requestStatus, createdAtOrAfter, orderBy, orderDirection (all optional)
 app.get('/api/xero/summary', async (req, res) => {
     try {
         const tok = await requireToken();
@@ -1316,8 +942,6 @@ app.get('/api/xero/summary', async (req, res) => {
 });
 
 // GET /api/xero/:type - single type across ALL entities
-// Must come BEFORE /api/xero/:type/:companyId so Express matches correctly
-// NOT paginated - returns first page of items. Use /api/xero/summary for true counts.
 app.get('/api/xero/:type', async (req, res) => {
     try {
         const tok = await requireToken();
@@ -1378,7 +1002,6 @@ app.get('/api/xero/:type', async (req, res) => {
 });
 
 // GET /api/xero/:type/:companyId - single type for a single entity
-// NOT paginated - returns one page of items. Caller can pass continuationToken to get next.
 app.get('/api/xero/:type/:companyId', async (req, res) => {
     try {
         const tok = await requireToken();
