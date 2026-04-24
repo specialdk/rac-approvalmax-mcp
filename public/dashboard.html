@@ -70,6 +70,7 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
 .kpi-sub { font-size: 11px; color: var(--ink-faint); margin-top: 4px; }
 .kpi-value.alert { color: var(--terra); }
 .kpi-value.warn { color: var(--ochre); }
+.kpi-value.ok { color: var(--moss); }
 
 .section-head { border-top: 2px solid var(--ink); padding-top: 14px; margin: 32px 0 16px; display: flex; align-items: baseline; justify-content: space-between; }
 .section-head h2 { font-size: 22px; letter-spacing: 0.3px; }
@@ -79,16 +80,21 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
 .gov-toggle { background: transparent; border: 1px solid var(--line-2); color: var(--ink-mute); padding: 10px 16px; cursor: pointer; font-family: 'IBM Plex Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; width: 100%; text-align: left; transition: background 0.15s, color 0.15s; display: flex; justify-content: space-between; align-items: center; }
 .gov-toggle:hover { background: var(--paper-2); color: var(--ink); }
 .gov-toggle .gov-toggle-right { font-weight: 400; opacity: 0.8; }
-.gov-strip { background: var(--terra-pale); border-left: 4px solid var(--terra); padding: 16px 20px; display: grid; grid-template-columns: 1fr 2fr; gap: 24px; align-items: center; margin-top: 8px; }
+.gov-strip { background: var(--terra-pale); border-left: 4px solid var(--terra); padding: 16px 20px; margin-top: 8px; }
 .gov-strip.hidden { display: none; }
-.gov-title { font-family: 'IBM Plex Serif', serif; font-size: 15px; font-weight: 500; color: var(--terra); margin-bottom: 4px; }
-.gov-body { font-size: 13px; color: var(--ink-soft); line-height: 1.6; }
+.gov-title { font-family: 'IBM Plex Serif', serif; font-size: 15px; font-weight: 500; color: var(--terra); margin-bottom: 6px; }
+.gov-body { font-size: 13px; color: var(--ink-soft); line-height: 1.6; margin-bottom: 14px; }
 .gov-body em { color: var(--ink-mute); font-style: italic; }
+.gov-methodology { background: var(--paper); border: 1px solid var(--line); padding: 10px 14px; margin-bottom: 14px; font-size: 12px; color: var(--ink-mute); line-height: 1.55; }
+.gov-methodology strong { font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--terra); font-weight: 500; margin-right: 6px; }
 .gov-metrics { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
-.gov-metric { text-align: center; background: var(--paper); padding: 8px 10px; border: 1px solid var(--line); }
-.gov-metric-name { font-family: 'IBM Plex Mono', monospace; font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--ink-mute); margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gov-metric { text-align: center; background: var(--paper); padding: 10px 10px; border: 1px solid var(--line); }
+.gov-metric-name { font-family: 'IBM Plex Mono', monospace; font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--ink-mute); margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gov-metric-val { font-family: 'IBM Plex Serif', serif; font-size: 17px; color: var(--ink); }
+.gov-metric-sub { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--ink-mute); margin-top: 3px; }
 .gov-metric-pct { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--terra); margin-top: 2px; }
+.gov-metric.clean .gov-metric-val { color: var(--moss); }
+.gov-metric.clean .gov-metric-pct { color: var(--moss); }
 
 .entity-panel { display: none; }
 .entity-panel.active { display: block; }
@@ -187,7 +193,7 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
     .welfare-grid { grid-template-columns: repeat(2, 1fr); }
     .panel-hero { grid-template-columns: 1fr; }
     .panel-quickstats { border-left: none; border-top: 1px solid var(--line-2); padding-left: 0; padding-top: 16px; }
-    .gov-strip { grid-template-columns: 1fr; }
+    .gov-metrics { grid-template-columns: repeat(2, 1fr); }
 }
 </style>
 </head>
@@ -219,10 +225,10 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
 <div class="shell" id="dashboardShell">
 
     <div class="kpi-strip">
-        <div class="kpi"><div class="kpi-label">Committed FY26</div><div class="kpi-value" id="kpiCommitted">—</div><div class="kpi-sub">across <span id="kpiEntityCount">—</span> entities, post-AM era</div></div>
-        <div class="kpi"><div class="kpi-label">Total POs</div><div class="kpi-value" id="kpiTotalPos">—</div><div class="kpi-sub">since 1 Jun 2025 (AM cutoff)</div></div>
+        <div class="kpi"><div class="kpi-label">Committed FY26</div><div class="kpi-value" id="kpiCommitted">—</div><div class="kpi-sub">across <span id="kpiEntityCount">—</span> entities · approved + on-approval</div></div>
+        <div class="kpi"><div class="kpi-label">Total POs</div><div class="kpi-value" id="kpiTotalPos">—</div><div class="kpi-sub">all statuses since 1 Jun 2025</div></div>
         <div class="kpi"><div class="kpi-label">Approved</div><div class="kpi-value" id="kpiApproved">—</div><div class="kpi-sub"><span id="kpiApprovedPct">—</span> of total</div></div>
-        <div class="kpi"><div class="kpi-label">Pending (draft / on-approval)</div><div class="kpi-value warn" id="kpiPending">—</div><div class="kpi-sub"><span id="kpiPendingPct">—</span> — needs review</div></div>
+        <div class="kpi"><div class="kpi-label">On Approval</div><div class="kpi-value warn" id="kpiOnApproval">—</div><div class="kpi-sub"><span id="kpiOnApprovalSub">awaiting sign-off</span></div></div>
         <div class="kpi"><div class="kpi-label">Rejected / Cancelled</div><div class="kpi-value alert" id="kpiRejCan">—</div><div class="kpi-sub">see governance detail</div></div>
         <div class="kpi"><div class="kpi-label">Entities live in AM</div><div class="kpi-value">5 of 7</div><div class="kpi-sub">Ngarrkuwuy &amp; Marrin Sq. outside</div></div>
     </div>
@@ -231,21 +237,22 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
     <div class="gov-toggle-row">
         <button class="gov-toggle" id="govToggle">
             <span><span id="govChevron">▸</span>&nbsp;&nbsp;Governance &amp; draft-rate detail</span>
-            <span class="gov-toggle-right"><span id="govTogglePending">—</span> pending · <span id="govToggleRejCan">—</span> rejected/cancelled · click to expand</span>
+            <span class="gov-toggle-right"><span id="govToggleDrafts">—</span> drafts · <span id="govToggleRejCan">—</span> rejected/cancelled · click to expand</span>
         </button>
         <div class="gov-strip hidden" id="govStrip">
-            <div>
-                <div class="gov-title">Draft / rejected / cancelled — split by AM-era vs legacy?</div>
-                <div class="gov-body">
-                    <span id="govDraftTotal">—</span> drafts and <span id="govRejCanTotal">—</span> rejected/cancelled POs represent effort that didn't result in approval. Question for Matt/Rhian: <em>were these raised after ApprovalMax went live, or are they legacy records backfilled during AM setup?</em> Post-AM rejections are governance signals worth action; pre-AM rejections are noise. Needs an "AM commissioning date" per entity to split correctly.
-                </div>
+            <div class="gov-methodology">
+                <strong>Methodology</strong> Financial figures on this dashboard (committed spend, top suppliers, budget-vs-actual) include POs with status <em>approved</em> or <em>on-approval</em>. Drafts are treated as procurement intent, not commitment — AM auto-saves partial form state when a user abandons a PO, producing stale records that don't represent real spend. Rejected and cancelled POs are also excluded. Drafts are shown below as a governance signal to keep periodically clean.
+            </div>
+            <div class="gov-title">Draft hygiene per entity</div>
+            <div class="gov-body">
+                <span id="govDraftTotal">—</span> drafts (<span id="govDraftValue">—</span>) are currently parked in AM across the corporation. Green entities below are clean (zero drafts). Cleanup happens via the <span class="mono">/api/draft-cleanup?entity=<em>name</em>&amp;format=csv</span> endpoint, run periodically by Matt. Rejected and cancelled POs (<span id="govRejCanTotal">—</span>) are dead records — no action required.
             </div>
             <div class="gov-metrics">
-                <div class="gov-metric"><div class="gov-metric-name">Aborig. Corp</div><div class="gov-metric-val" id="govAborigVal">—</div><div class="gov-metric-pct" id="govAborigPct">—</div></div>
-                <div class="gov-metric"><div class="gov-metric-name">Enterprises</div><div class="gov-metric-val" id="govEntVal">—</div><div class="gov-metric-pct" id="govEntPct">—</div></div>
-                <div class="gov-metric"><div class="gov-metric-name">Property Mgmt</div><div class="gov-metric-val" id="govRpmmsVal">—</div><div class="gov-metric-pct" id="govRpmmsPct">—</div></div>
-                <div class="gov-metric"><div class="gov-metric-name">Mining</div><div class="gov-metric-val" id="govMiningVal">—</div><div class="gov-metric-pct" id="govMiningPct">—</div></div>
-                <div class="gov-metric"><div class="gov-metric-name">Investments</div><div class="gov-metric-val" id="govInvestVal">—</div><div class="gov-metric-pct" id="govInvestPct">—</div></div>
+                <div class="gov-metric" id="govMetric_aborig"><div class="gov-metric-name">Aborig. Corp</div><div class="gov-metric-val" id="govAborigVal">—</div><div class="gov-metric-sub" id="govAborigSub">—</div><div class="gov-metric-pct" id="govAborigPct">—</div></div>
+                <div class="gov-metric" id="govMetric_enterprises"><div class="gov-metric-name">Enterprises</div><div class="gov-metric-val" id="govEntVal">—</div><div class="gov-metric-sub" id="govEntSub">—</div><div class="gov-metric-pct" id="govEntPct">—</div></div>
+                <div class="gov-metric" id="govMetric_rpmms"><div class="gov-metric-name">Property Mgmt</div><div class="gov-metric-val" id="govRpmmsVal">—</div><div class="gov-metric-sub" id="govRpmmsSub">—</div><div class="gov-metric-pct" id="govRpmmsPct">—</div></div>
+                <div class="gov-metric" id="govMetric_mining"><div class="gov-metric-name">Mining</div><div class="gov-metric-val" id="govMiningVal">—</div><div class="gov-metric-sub" id="govMiningSub">—</div><div class="gov-metric-pct" id="govMiningPct">—</div></div>
+                <div class="gov-metric" id="govMetric_invest"><div class="gov-metric-name">Investments</div><div class="gov-metric-val" id="govInvestVal">—</div><div class="gov-metric-sub" id="govInvestSub">—</div><div class="gov-metric-pct" id="govInvestPct">—</div></div>
             </div>
         </div>
     </div>
@@ -262,7 +269,7 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
         </div>
         <div class="content-grid">
             <div class="card">
-                <div class="card-head"><div class="card-title">Top suppliers across the corporation</div><div class="card-meta">by value · top 10</div></div>
+                <div class="card-head"><div class="card-title">Top suppliers across the corporation</div><div class="card-meta">by value · top 10 · approved + on-approval</div></div>
                 <table class="data-table">
                     <thead><tr><th>Supplier</th><th>Entity</th><th class="num">POs</th><th class="num">Value</th></tr></thead>
                     <tbody id="topSuppliersBody"><tr class="placeholder-row"><td colspan="4">Loading…</td></tr></tbody>
@@ -383,7 +390,7 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
             <div class="panel-quickstats">
                 <div class="quickstat-row"><span class="quickstat-label">Committed YTD</span><span class="quickstat-val" id="entYtd">—</span></div>
                 <div class="quickstat-row"><span class="quickstat-label">Total POs</span><span class="quickstat-val" id="entPos">—</span></div>
-                <div class="quickstat-row"><span class="quickstat-label">Drafts pending</span><span class="quickstat-val" id="entDrafts" style="color: var(--terra);">—</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Drafts parked</span><span class="quickstat-val" id="entDrafts">—</span></div>
                 <div class="quickstat-row"><span class="quickstat-label">Suppliers</span><span class="quickstat-val" id="entSuppliers">—</span></div>
                 <div class="quickstat-row"><span class="quickstat-label">Top supplier share</span><span class="quickstat-val" id="entTopShare">—</span></div>
             </div>
@@ -434,7 +441,7 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
                     <thead><tr><th>Supplier</th><th class="num">POs</th><th class="num">Avg / PO</th><th class="num">Total</th></tr></thead>
                     <tbody id="entSuppliersBody"><tr class="placeholder-row"><td colspan="4">Loading…</td></tr></tbody>
                 </table>
-                <div class="todo" style="margin-top: 16px;"><strong>FLAG</strong> Data-quality issue: <span id="entUnknownFlag">—</span>. "Unknown" supplier names in AM indicate records that need remediation upstream in Xero.</div>
+                <div class="todo" style="margin-top: 16px;" id="entBlankFlag" style="display: none;"><strong>FLAG</strong> <span id="entBlankFlagBody">—</span></div>
             </div>
             <div class="card">
                 <div class="card-head"><div class="card-title">Spend by programme</div><div class="card-meta">by account code</div></div>
@@ -457,7 +464,7 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
             <div class="panel-quickstats">
                 <div class="quickstat-row"><span class="quickstat-label">Committed YTD</span><span class="quickstat-val" id="rpmmsYtd">—</span></div>
                 <div class="quickstat-row"><span class="quickstat-label">Total POs</span><span class="quickstat-val" id="rpmmsPos">—</span></div>
-                <div class="quickstat-row"><span class="quickstat-label">Drafts pending</span><span class="quickstat-val" id="rpmmsDrafts" style="color: var(--ochre);">—</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Drafts parked</span><span class="quickstat-val" id="rpmmsDrafts">—</span></div>
                 <div class="quickstat-row"><span class="quickstat-label">Suppliers</span><span class="quickstat-val" id="rpmmsSuppliers">—</span></div>
                 <div class="quickstat-row"><span class="quickstat-label">Account codes used</span><span class="quickstat-val" id="rpmmsAccounts">—</span></div>
             </div>
@@ -531,7 +538,7 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
             <div class="panel-quickstats">
                 <div class="quickstat-row"><span class="quickstat-label">Committed YTD</span><span class="quickstat-val" id="miningYtd">—</span></div>
                 <div class="quickstat-row"><span class="quickstat-label">Total POs</span><span class="quickstat-val" id="miningPos">—</span></div>
-                <div class="quickstat-row"><span class="quickstat-label">Drafts pending</span><span class="quickstat-val" id="miningDrafts" style="color: var(--ochre);">—</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Drafts parked</span><span class="quickstat-val" id="miningDrafts">—</span></div>
                 <div class="quickstat-row"><span class="quickstat-label">Fuel share</span><span class="quickstat-val" id="miningFuelShare">—</span></div>
                 <div class="quickstat-row"><span class="quickstat-label">Suppliers</span><span class="quickstat-val" id="miningSuppliers">—</span></div>
             </div>
@@ -600,12 +607,12 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
             <div>
                 <div class="panel-kicker">Rirratjingu Investments / Miliditjpi Trust · capital works</div>
                 <div class="panel-title">Property portfolio &amp; episodic capital projects</div>
-                <div class="panel-standfirst">The smallest entity by PO count (<span class="dyn" id="investStandPos">—</span>) but meaningful by value (<span class="dyn" id="investStandValue">—</span>). Single-shot big-ticket projects dominate — construction contracts and accommodation improvements. Highest draft rate across the group; review appropriate.</div>
+                <div class="panel-standfirst">The smallest entity by PO count (<span class="dyn" id="investStandPos">—</span>) but meaningful by value (<span class="dyn" id="investStandValue">—</span>). Single-shot big-ticket projects dominate — construction contracts and accommodation improvements.</div>
             </div>
             <div class="panel-quickstats">
                 <div class="quickstat-row"><span class="quickstat-label">Committed YTD</span><span class="quickstat-val" id="investYtd">—</span></div>
                 <div class="quickstat-row"><span class="quickstat-label">Total POs</span><span class="quickstat-val" id="investPos">—</span></div>
-                <div class="quickstat-row"><span class="quickstat-label">Drafts pending</span><span class="quickstat-val" id="investDrafts" style="color: var(--terra);">—</span></div>
+                <div class="quickstat-row"><span class="quickstat-label">Drafts parked</span><span class="quickstat-val" id="investDrafts">—</span></div>
                 <div class="quickstat-row"><span class="quickstat-label">Suppliers</span><span class="quickstat-val" id="investSuppliers">—</span></div>
                 <div class="quickstat-row"><span class="quickstat-label">Biggest PO</span><span class="quickstat-val" id="investBiggestPo">—</span></div>
             </div>
@@ -840,19 +847,29 @@ function entityBy(key) {
 function renderGlobalKPIs() {
     if (!state.scan) return;
     const entities = state.scan.entitySummaries;
+
+    // Sum governance totals across all entities. The new server response
+    // includes draftCount, draftValue, onApprovalCount, onApprovalValue on
+    // each entity — plus the old statusCounts for reject/cancel rollup.
     const totals = entities.reduce((acc, e) => {
         acc.posTotal += (e.posTotal || 0);
         acc.totalValue += (e.totalValue || 0);
+        acc.draftCount += (e.draftCount || 0);
+        acc.draftValue += (e.draftValue || 0);
+        acc.onApprovalCount += (e.onApprovalCount || 0);
+        acc.onApprovalValue += (e.onApprovalValue || 0);
         const sc = e.statusCounts || {};
         acc.approved += (sc.approved || 0);
-        acc.draft += (sc.draft || 0);
-        acc.onApproval += (sc['on-approval'] || 0);
         acc.rejected += (sc.rejected || 0);
         acc.cancelled += (sc.cancelled || 0);
         return acc;
-    }, { posTotal: 0, totalValue: 0, approved: 0, draft: 0, onApproval: 0, rejected: 0, cancelled: 0 });
+    }, {
+        posTotal: 0, totalValue: 0,
+        draftCount: 0, draftValue: 0,
+        onApprovalCount: 0, onApprovalValue: 0,
+        approved: 0, rejected: 0, cancelled: 0
+    });
 
-    const pending = totals.draft + totals.onApproval;
     const rejCan = totals.rejected + totals.cancelled;
 
     document.getElementById('kpiCommitted').textContent = moneyK(totals.totalValue);
@@ -860,15 +877,19 @@ function renderGlobalKPIs() {
     document.getElementById('kpiTotalPos').textContent = num(totals.posTotal);
     document.getElementById('kpiApproved').textContent = num(totals.approved);
     document.getElementById('kpiApprovedPct').textContent = pct(totals.approved / totals.posTotal);
-    document.getElementById('kpiPending').textContent = num(pending);
-    document.getElementById('kpiPendingPct').textContent = pct(pending / totals.posTotal) + ' of total';
+    document.getElementById('kpiOnApproval').textContent = num(totals.onApprovalCount);
+    document.getElementById('kpiOnApprovalSub').textContent = moneyK(totals.onApprovalValue) + ' awaiting sign-off';
     document.getElementById('kpiRejCan').textContent = num(rejCan);
-    document.getElementById('govTogglePending').textContent = num(pending);
+
+    document.getElementById('govToggleDrafts').textContent = num(totals.draftCount);
     document.getElementById('govToggleRejCan').textContent = num(rejCan);
-    document.getElementById('govDraftTotal').textContent = num(totals.draft);
+    document.getElementById('govDraftTotal').textContent = num(totals.draftCount);
+    document.getElementById('govDraftValue').textContent = moneyK(totals.draftValue);
     document.getElementById('govRejCanTotal').textContent = num(rejCan);
 
-    // Entity tabs meta
+    // Entity tabs meta — show POs committed ($value) for quick orientation.
+    // posTotal shown is the full PO count (all statuses) so tab counts
+    // line up with what people see when they log into AM directly.
     const renderTabMeta = (key, elId) => {
         const e = entityBy(key);
         if (!e) return;
@@ -885,20 +906,28 @@ function renderGlobalKPIs() {
 
 function renderGovernance() {
     if (!state.scan) return;
-    const entities = state.scan.entitySummaries;
-    const fill = (key, valId, pctId) => {
+    // Per-entity draft count + $value. Uses new server fields (draftCount,
+    // draftValue) rather than statusCounts.draft. Adds "clean" CSS class
+    // when an entity has zero drafts so it renders green instead of amber.
+    const fill = (key, valId, subId, pctId, metricWrapperId) => {
         const e = entityBy(key);
         if (!e) return;
-        const draft = (e.statusCounts || {}).draft || 0;
+        const draft = e.draftCount || 0;
+        const draftVal = e.draftValue || 0;
         const total = e.posTotal || 1;
         document.getElementById(valId).textContent = num(draft);
-        document.getElementById(pctId).textContent = pct(draft / total) + ' draft';
+        document.getElementById(subId).textContent = moneyK(draftVal);
+        document.getElementById(pctId).textContent = draft === 0
+            ? 'clean'
+            : pct(draft / total) + ' draft';
+        const wrapper = document.getElementById(metricWrapperId);
+        if (wrapper) wrapper.classList.toggle('clean', draft === 0);
     };
-    fill('aborig', 'govAborigVal', 'govAborigPct');
-    fill('enterprises', 'govEntVal', 'govEntPct');
-    fill('rpmms', 'govRpmmsVal', 'govRpmmsPct');
-    fill('mining', 'govMiningVal', 'govMiningPct');
-    fill('invest', 'govInvestVal', 'govInvestPct');
+    fill('aborig', 'govAborigVal', 'govAborigSub', 'govAborigPct', 'govMetric_aborig');
+    fill('enterprises', 'govEntVal', 'govEntSub', 'govEntPct', 'govMetric_enterprises');
+    fill('rpmms', 'govRpmmsVal', 'govRpmmsSub', 'govRpmmsPct', 'govMetric_rpmms');
+    fill('mining', 'govMiningVal', 'govMiningSub', 'govMiningPct', 'govMetric_mining');
+    fill('invest', 'govInvestVal', 'govInvestSub', 'govInvestPct', 'govMetric_invest');
 }
 
 function renderOverviewPanel() {
@@ -906,6 +935,9 @@ function renderOverviewPanel() {
     const fill = (key, valId, subId) => {
         const e = entityBy(key);
         if (!e) return;
+        // Overview entity cards show committed $ (financial) + full PO count
+        // so users see the committed figure alongside total activity. Number
+        // of suppliers reflects the filtered (financial) set — "real" suppliers.
         const posStr = e.capped ? e.posTotal + '+' : num(e.posTotal);
         document.getElementById(valId).textContent = moneyK(e.totalValue);
         document.getElementById(subId).textContent = posStr + ' POs · ' + (e.uniqueSuppliers || '—') + ' suppliers';
@@ -916,7 +948,11 @@ function renderOverviewPanel() {
     fill('mining', 'oeMiningVal', 'oeMiningSub');
     fill('invest', 'oeInvestVal', 'oeInvestSub');
 
-    // Top suppliers across the corporation (flatten + sort + top 10)
+    // Top suppliers across the corporation (flatten + sort + top 10).
+    // The backend now excludes drafts from supplierTotals so "Unknown"
+    // should no longer appear here. The old "|| 'Unknown'" fallback has
+    // been changed to "(blank)" for the rare post-filter case, so any
+    // surviving blanks are honestly labelled.
     const all = [];
     state.scan.entitySummaries.forEach(e => {
         const key = COMPANY_ID_TO_KEY[e.companyId];
@@ -932,15 +968,19 @@ function renderOverviewPanel() {
     all.sort((a, b) => b.total - a.total);
     const top = all.slice(0, 10);
     document.getElementById('topSuppliersBody').innerHTML = top.map(s => {
+        const suffix = s.name === '(blank)'
+            ? ' <span class="account-desc">blank — should not occur</span>'
+            : '';
         return '<tr>' +
-            '<td class="supplier-name">' + escapeHtml(s.name) + '</td>' +
+            '<td class="supplier-name">' + escapeHtml(s.name) + suffix + '</td>' +
             '<td class="mono-small">' + escapeHtml(s.entityLabel) + '</td>' +
             '<td class="num">' + num(s.poCount) + '</td>' +
             '<td class="num">' + moneyFull(s.total) + '</td>' +
             '</tr>';
     }).join('');
 
-    // Spend concentration (top supplier share per entity)
+    // Spend concentration (top supplier share per entity).
+    // Uses financial totalValue as denominator, not full total.
     const concEntries = state.scan.entitySummaries.map(e => {
         const key = COMPANY_ID_TO_KEY[e.companyId];
         const topSup = (e.topSuppliersByValue || [])[0];
@@ -981,19 +1021,36 @@ function renderOverviewPanel() {
     }
 }
 
+// Helper: render the "Drafts parked" quickstat line on an entity panel.
+// 0 drafts = green (clean); >0 drafts = amber/red per entity's historical
+// colour style. The element's inline style.color was set on the HTML
+// template for entities that tend to have drafts; for the zero case we
+// override to the moss green to celebrate a clean slate.
+function renderDraftQuickstat(draftCount, draftValue, elementId) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    if (draftCount === 0) {
+        el.textContent = '0 · clean';
+        el.style.color = 'var(--moss)';
+    } else {
+        el.textContent = num(draftCount) + ' (' + moneyK(draftValue) + ')';
+        // Keep the warning colour set in the HTML template. If no inline
+        // colour set (i.e. originally clean), ochre is a safe default.
+        if (!el.style.color || el.style.color === 'var(--moss)') {
+            el.style.color = 'var(--ochre)';
+        }
+    }
+}
+
 function renderEntityPanel(key, prefix) {
     const e = entityBy(key);
     if (!e) return;
-    const drafts = (e.statusCounts || {}).draft || 0;
-    const draftPctNum = Math.round((drafts / (e.posTotal || 1)) * 100);
 
     const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
     set(prefix + 'Ytd', moneyK(e.totalValue));
     set(prefix + 'Pos', (e.capped ? e.posTotal + '+' : num(e.posTotal)));
-    set(prefix + 'Drafts', num(drafts) + ' (' + draftPctNum + '%)');
+    renderDraftQuickstat(e.draftCount || 0, e.draftValue || 0, prefix + 'Drafts');
     set(prefix + 'Suppliers', num(e.uniqueSuppliers));
-
-    // Account codes count (RPMMS only uses this)
     set(prefix + 'Accounts', num(e.uniqueAccountCodes));
 }
 
@@ -1016,19 +1073,25 @@ function renderEnterprisesPanel() {
     document.getElementById('entSuppliersBody').innerHTML = suppliers.map(s => {
         const avg = s.poCount > 0 ? moneyK(s.total / s.poCount) : '—';
         const hint = s.name.toLowerCase().includes('gracie') ? ' <span class="account-desc">Pond 5 rehab · hydromulch</span>' :
-            s.name.toLowerCase().includes('unknown') ? ' <span class="account-desc">data-quality issue</span>' : '';
+            s.name === '(blank)' ? ' <span class="account-desc">blank — should not occur</span>' : '';
         return '<tr><td class="supplier-name">' + escapeHtml(s.name) + hint + '</td>' +
             '<td class="num">' + num(s.poCount) + '</td>' +
             '<td class="num">' + avg + '</td>' +
             '<td class="num">' + moneyFull(s.total) + '</td></tr>';
     }).join('');
 
-    // "Unknown" supplier flag
-    const unknown = (e.topSuppliersByValue || []).find(s => s.name.toLowerCase().includes('unknown'));
-    if (unknown) {
-        document.getElementById('entUnknownFlag').textContent = num(unknown.poCount) + ' POs with supplier "Unknown" totalling ' + moneyK(unknown.total);
-    } else {
-        document.getElementById('entUnknownFlag').textContent = 'No "Unknown" supplier records flagged';
+    // Blank-supplier flag — only shown if the filtered financial pool
+    // still contains a "(blank)" supplier. Under the new rules this should
+    // be rare (blanks cluster in drafts, which are excluded), so presence
+    // here is a genuine exception worth flagging.
+    const blankSupplier = (e.topSuppliersByValue || []).find(s => s.name === '(blank)');
+    const flagEl = document.getElementById('entBlankFlag');
+    if (blankSupplier && flagEl) {
+        flagEl.style.display = 'block';
+        document.getElementById('entBlankFlagBody').textContent =
+            num(blankSupplier.poCount) + ' approved/on-approval POs carry no supplier (' + moneyK(blankSupplier.total) + ' in aggregate). This should not happen — investigate with Matt.';
+    } else if (flagEl) {
+        flagEl.style.display = 'none';
     }
 
     // Accounts table
@@ -1082,7 +1145,7 @@ function renderMiningPanel() {
     const suppliers = (e.topSuppliersByValue || []).slice(0, 5);
     document.getElementById('miningSuppliersBody').innerHTML = suppliers.map(s => {
         const hint = /^rirratjingu/i.test(s.name) ? ' <span class="account-desc">intercompany</span>' :
-            /unknown/i.test(s.name) ? ' <span class="account-desc">data-quality issue</span>' : '';
+            s.name === '(blank)' ? ' <span class="account-desc">blank — should not occur</span>' : '';
         return '<tr><td class="supplier-name">' + escapeHtml(s.name) + hint + '</td>' +
             '<td class="num">' + num(s.poCount) + '</td>' +
             '<td class="num">' + moneyFull(s.total) + '</td></tr>';
@@ -1128,7 +1191,7 @@ function renderInvestPanel() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//   Render — welfare data (Aboriginal Corp panel)
+//   Render — welfare data (Aboriginal Corp panel) [unchanged from prior]
 // ═══════════════════════════════════════════════════════════════════════════
 
 function renderAborigPanel() {
@@ -1173,7 +1236,7 @@ function renderAborigPanel() {
         if (!cat) return;
         const pctOfBaseline = cat.fy25Baseline > 0 ? Math.min(100, Math.round((cat.ytdTotal / cat.fy25Baseline) * 100)) : 0;
         const barClass = pctOfBaseline < w.fyPaceFraction * 100 - 15 ? 'under' : pctOfBaseline > w.fyPaceFraction * 100 + 15 ? 'over' : 'on';
-        const isUndercount = catName === 'Family Funeral Support' && cat.ytdTotal < 50000;  // heuristic
+        const isUndercount = catName === 'Family Funeral Support' && cat.ytdTotal < 50000;
         const ytdColor = isUndercount ? 'var(--terra)' : 'var(--ink)';
         cardsHtml.push(
             '<div class="welfare-card">' +
@@ -1193,7 +1256,6 @@ function renderAborigPanel() {
         );
     });
 
-    // Combined small categories (Whitegoods/Medical/Education/Future Leaders)
     let smallTotal = 0;
     let smallPos = 0;
     let smallBaseline = 0;
@@ -1222,7 +1284,6 @@ function renderAborigPanel() {
 
     document.getElementById('welfareGrid').innerHTML = cardsHtml.join('');
 
-    // Clan family distribution — uses new topFamilies field from classifier
     if (familyCharitable && familyCharitable.topFamilies) {
         const families = familyCharitable.topFamilies
             .filter(f => f.total > 0)
@@ -1240,7 +1301,6 @@ function renderAborigPanel() {
             '<tr class="placeholder-row"><td colspan="4">Family rollup not yet available from API — waiting for next classifier deploy.</td></tr>';
     }
 
-    // Top welfare suppliers (from Family Charitable category)
     if (familyCharitable && familyCharitable.topSuppliers) {
         document.getElementById('welfareSuppliersBody').innerHTML = familyCharitable.topSuppliers.slice(0, 8).map(s => {
             return '<tr><td class="supplier-name">' + escapeHtml(s.name) + '</td>' +
@@ -1248,10 +1308,9 @@ function renderAborigPanel() {
         }).join('');
     }
 
-    // Funeral flag body — check actual data
     const funeralCat = w.categories.find(c => c.arLine === 'Family Funeral Support');
     if (funeralCat && funeralCat.ytdTotal < 50000) {
-        document.getElementById('funeralFlagBody').textContent = 
+        document.getElementById('funeralFlagBody').textContent =
             'Family Funeral Support shows ' + moneyK(funeralCat.ytdTotal) + ' YTD but AR baseline is ' + moneyK(funeralCat.fy25Baseline) + '. ' +
             'Funeral-context spend (flights for funerals, groceries for wakes) is landing in other categories because the classifier currently matches funeral-named suppliers only. Next classifier iteration will route account 63205 → Family Funeral Support.';
     } else {
@@ -1260,14 +1319,8 @@ function renderAborigPanel() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//   Render — budget vs actual (FY26 Xero, per-entity cards)
+//   Render — budget vs actual (FY26 Xero, per-entity cards) [unchanged]
 // ═══════════════════════════════════════════════════════════════════════════
-//
-// One card per entity panel. Compares fy26Budget (full-year) against
-// ytdActual.totalCosts (which correctly includes COGS for trading entities).
-// Colour logic is pace-aware: at 10/12 months elapsed, the pace is 83%.
-// Revenue: green if ≥ pace-8 (≥75%), amber if ≥ pace-20 (≥63%), red below.
-// Costs:   green if ≤ pace+8 (≤91%), amber if ≤ pace+20 (≤103%), red above.
 
 function renderBudgetCards() {
     if (!state.budget || !state.budget.entities) return;
@@ -1276,7 +1329,6 @@ function renderBudgetCards() {
     const monthsElapsed = period.monthsElapsed || 0;
     const pacePctNum = Math.round((monthsElapsed / 12) * 100);
 
-    // Format "23 Apr" from ISO
     const asOfDate = period.asOfDate ? new Date(period.asOfDate) : new Date();
     const asOfDisplay = asOfDate.toLocaleDateString('en-AU', { day: '2-digit', month: 'short' });
 
@@ -1304,7 +1356,6 @@ function renderBudgetCards() {
         const b = e.fy26Budget || {};
         const a = e.ytdActual || {};
 
-        // Revenue row
         setText('budgetRev_' + key, moneyK(b.revenue));
         setText('actualRev_' + key, moneyK(a.revenue));
         const revPct = b.revenue > 0 ? Math.round((a.revenue / b.revenue) * 100) : 0;
@@ -1313,7 +1364,6 @@ function renderBudgetCards() {
             : revPct >= pacePctNum - 20 ? 'warn' : 'alert';
         setPctClass('pctRev_' + key, revTier);
 
-        // Costs row — uses totalCosts (includes COGS where applicable)
         setText('budgetCost_' + key, moneyK(b.expenses));
         setText('actualCost_' + key, moneyK(a.totalCosts));
         const costPct = b.expenses > 0 ? Math.round((a.totalCosts / b.expenses) * 100) : 0;
@@ -1322,7 +1372,6 @@ function renderBudgetCards() {
             : costPct <= pacePctNum + 20 ? 'warn' : 'alert';
         setPctClass('pctCost_' + key, costTier);
 
-        // Net row — no % column, annotate with a short note instead
         setText('budgetNet_' + key, moneyK(b.netProfit));
         setText('actualNet_' + key, moneyK(a.netProfit));
         let note = '';
@@ -1367,7 +1416,7 @@ async function checkAuth() {
         const data = await res.json();
         return !!data.authenticated;
     } catch (e) {
-        return null;  // network failure
+        return null;
     }
 }
 
@@ -1407,9 +1456,6 @@ async function loadEntityScan() {
     }
 }
 
-// Budget load is independent of AM auth — the /api/budget-vs-actual endpoint
-// is a server-to-server proxy to Matt's Xero API and doesn't require a user
-// session. Failure here does NOT block the AM banner going to "Live".
 async function loadBudgetVsActual() {
     try {
         const res = await fetch('/api/budget-vs-actual');
@@ -1420,8 +1466,6 @@ async function loadBudgetVsActual() {
         renderBudgetCards();
     } catch (err) {
         state.budgetError = err.message;
-        // Surface the error inline on each card so it's obvious something's wrong,
-        // but don't kill the banner.
         ['aborig', 'enterprises', 'rpmms', 'mining', 'invest'].forEach(key => {
             const noteEl = document.getElementById('netNote_' + key);
             if (noteEl) noteEl.textContent = 'budget fetch failed';
@@ -1442,7 +1486,6 @@ async function boot() {
         return;
     }
 
-    // Fire three in parallel. Each updates its own sections on completion.
     loadWelfare();
     loadEntityScan();
     loadBudgetVsActual();
