@@ -215,9 +215,10 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
 
 #chatPanel {
     position: fixed;
+    top: 24px;
     bottom: 24px;
     right: 24px;
-    width: 380px;
+    width: 420px;
     max-width: calc(100vw - 32px);
     height: 600px;
     max-height: calc(100vh - 48px);
@@ -230,6 +231,7 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
     z-index: 1001;
     font-family: inherit;
 }
+
 #chatPanel.open { display: flex; }
 
 .chat-header { padding: 14px 18px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; }
