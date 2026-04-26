@@ -247,6 +247,10 @@ function isInternalCorporate(po) {
 // at line level (categoryName: "Job", optionName: "FG 6", etc.). We
 // don't pre-process these on the PO — we just walk lineItems here so
 // the categoriser is self-contained regardless of who calls it.
+//
+// NOTE: Currently unused by classifyPO (we route Funeral by GL account
+// 63205 instead). Helper retained because it'll be useful when we add
+// per-Job rollup panels in a later iteration.
 function extractJobOptions(po) {
     const jobs = new Set();
     for (const li of (po.lineItems || [])) {
@@ -287,20 +291,19 @@ function classifyPO(po) {
     
     if (isInternalCorporate(po)) return { excluded: 'internal_corporate' };
 
-    // ── Job-based override ──────────────────────────────────────────
-    // If a line on this PO carries a Job tag matching the funeral
-    // pattern, the team has explicitly told us this is funeral spend.
-    // Trust them over any supplier/account/description inference.
-    const jobOptions = extractJobOptions(po);
-    const funeralJob = jobOptions.find(j =>
-        /^FG\s*\d+\b/i.test(j) ||
-        /funeral/i.test(j)
+    // ── Account-based override ───────────────────────────────────────
+    // If any line on this PO is booked to account 63205 (Funeral
+    // Expenses), this is funeral spend. The GL account is the team's
+    // explicit "this is a funeral" decision — Job/FG tags travel
+    // alongside but identify which family, not which purpose.
+    const hasFuneralAccount = (po.lineItems || []).some(li =>
+        li.accountCode === '63205'
     );
-    if (funeralJob) {
+    if (hasFuneralAccount) {
         return {
             category: 'Family Funeral Support',
             confidence: 'high',
-            reason: `Job tag "${funeralJob}"`
+            reason: 'line booked to account 63205 (Funeral Expenses)'
         };
     }
 
@@ -523,6 +526,7 @@ function buildWelfareSummary(pos, opts = {}) {
             note: 'Heuristic classifier. See SAMPLING_FINDINGS.md §3-4 for rules. Recipient names are rolled up to clan-family level (topFamilies) on the dashboard; individual-level topRecipients is retained for authorised finance use.',
             rules: [
                 'Internal corporate exclusion: vehicle regos, office keywords, "pick up by RAC"; RAC facilities (Barawun Centre, ISEP bus, NEAL workshop); intercompany Rirratjingu suppliers; printing/signage/IT/branding vendors',
+                'Account-based override (high): any line booked to 63205 Funeral Expenses → Family Funeral Support',
                 'Supplier + account combo (high): BP + 63415 → Family Charitable; Gove Warehouse + 64480 → Whitegoods',
                 'Supplier name hint (high): Gove Transport/taxi, Air Frontier/Black Diamond/MAF/HM Air → Transport; funeral/memorial → Family Funeral; medical/chemist → Medical; Harvey Norman → Whitegoods; Buku Larrngay Mulka → Culture & Ceremony',
                 'Account code family (high): 250xx → Family Charitable',
