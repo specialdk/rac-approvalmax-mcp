@@ -270,6 +270,26 @@ function classifyPO(po) {
     
     if (isInternalCorporate(po)) return { excluded: 'internal_corporate' };
 
+    // ── Job-based override ──────────────────────────────────────────
+    // If a line on this PO carries a Job tag matching the funeral
+    // pattern (FG <number>, F<number>, or "Funeral"-prefixed), the
+    // team has explicitly told us this is funeral spend. Trust them
+    // over any supplier/account/description inference downstream.
+    if (Array.isArray(po.jobCodes)) {
+        const funeralJob = po.jobCodes.find(j =>
+            /^FG\s*\d+\b/i.test(j) ||
+            /^F\s*\d+\b/i.test(j) ||
+            /funeral/i.test(j)
+        );
+        if (funeralJob) {
+            return {
+                category: 'Family Funeral Support',
+                confidence: 'high',
+                reason: `Job tag "${funeralJob}"`
+            };
+        }
+    }
+
     for (const combo of SUPPLIER_ACCOUNT_COMBOS) {
         if (combo.supplierPattern.test(supplier) && combo.accountCodes.includes(accountCode)) {
             return { category: combo.category, confidence: combo.confidence, reason: combo.reason };

@@ -194,32 +194,42 @@ function summarisePosShape(pos) {
         supplierCounts[supplier] = (supplierCounts[supplier] || 0) + 1;
 
         if (Array.isArray(po.lineItems)) {
-            // ── TEMP DIAGNOSTIC ───────────────────────────────────────────
-            // Logs ONE sample line item across the whole scan so we can see
-            // what shape AM returns tracking categories in. Remove this
-            // block once we've extracted the field name.
-            if (!global.__loggedSampleLine && po.lineItems[0]) {
-                console.log('=== SAMPLE LINE ITEM (full shape) ===');
-                console.log(JSON.stringify(po.lineItems[0], null, 2));
-                console.log('=== SAMPLE PO TOP-LEVEL KEYS ===');
-                console.log(Object.keys(po).join(', '));
-                global.__loggedSampleLine = true;
-            }
-            // ──────────────────────────────────────────────────────────────
+            // Job/tracking rollup: collect every distinct option name across
+            // all lines on this PO, normalised to upper-case for matching.
+            // Stored on the PO so welfare-categoriser can read it without
+            // walking line items again. AM exposes tracking at line level
+            // only — there's no PO-level tracking field.
+            const jobSet = new Set();
+
             for (const li of po.lineItems) {
+                // Existing account aggregation
                 const code = li.accountCode;
-                if (!code) continue;
-                
-                if (!accountTotals[code]) {
-                    accountTotals[code] = {
-                        accountCode: code,
-                        account: li.account || null,
-                        total: 0,
-                        poCount: 0
-                    };
+                if (code) {
+                    if (!accountTotals[code]) {
+                        accountTotals[code] = {
+                            accountCode: code,
+                            account: li.account || null,
+                            total: 0,
+                            poCount: 0
+                        };
+                    }
+                    accountTotals[code].total += (li.amount || 0);
+                    accountTotals[code].poCount += 1;
                 }
-                accountTotals[code].total += (li.amount || 0);
-                accountTotals[code].poCount += 1;
+
+                // NEW: collect Job tracking options for this line
+                if (Array.isArray(li.tracking)) {
+                    for (const t of li.tracking) {
+                        if (t && t.categoryName === 'Job' && t.optionName) {
+                            jobSet.add(t.optionName);
+                        }
+                    }
+                }
+            }
+
+            // Stash the rollup on the PO so downstream code can use it
+            if (jobSet.size > 0) {
+                po.jobCodes = Array.from(jobSet);
             }
         }
     }
