@@ -600,19 +600,61 @@ app.get('/', (req, res) => {
 // ────────────────────────────────────────────────────────────────────────
 // OAuth endpoints
 // ────────────────────────────────────────────────────────────────────────
+// Helper: build the ApprovalMax OAuth authorise URL.
+// Used by both /auth/start (returns JSON for the existing front-end button)
+// and /go (the smart bookmark - 302 redirects straight to AM consent).
+function buildApprovalMaxAuthUrl() {
+    const state = Math.random().toString(36).substring(2, 15);
+    const params = new URLSearchParams({
+        response_type: 'code',
+        client_id: APPROVALMAX_CONFIG.clientId,
+        scope: APPROVALMAX_CONFIG.scopes.join(' '),
+        redirect_uri: APPROVALMAX_CONFIG.redirectUri,
+        state: state
+    });
+    return `${APPROVALMAX_CONFIG.authUrl}?${params.toString()}`;
+}
+
+// Existing JSON endpoint - kept so the / homepage button still works.
 app.get('/auth/start', (req, res) => {
     try {
-        const state = Math.random().toString(36).substring(2, 15);
-        const params = new URLSearchParams({
-            response_type: 'code',
-            client_id: APPROVALMAX_CONFIG.clientId,
-            scope: APPROVALMAX_CONFIG.scopes.join(' '),
-            redirect_uri: APPROVALMAX_CONFIG.redirectUri,
-            state: state
-        });
-        res.json({ authUrl: `${APPROVALMAX_CONFIG.authUrl}?${params.toString()}` });
+        res.json({ authUrl: buildApprovalMaxAuthUrl() });
     } catch (error) {
         res.status(500).json({ error: error.message });
+    }
+});
+
+// Smart entry point. THIS is the one bookmark users get.
+//   - Token valid -> redirect to /dashboard.html
+//   - Token missing/dead -> redirect straight to AM consent screen
+// After AM consent, the existing /callback/approvalmax handler stores the
+// token and lands the user on /dashboard.html (see callback change below).
+app.get('/go', async (req, res) => {
+    try {
+        // Force=1 query param lets the dashboard footer "Reconnect" link
+        // bypass the auth check and always re-run consent.
+        if (req.query.force === '1') {
+            return res.redirect(buildApprovalMaxAuthUrl());
+        }
+
+        const result = await pool.query(
+            'SELECT access_token, expires_at, refresh_token FROM approvalmax_tokens WHERE integration_key = $1',
+            [INTEGRATION_KEY]
+        );
+
+        const row = result.rows[0];
+        const expiresAt = row ? Number(row.expires_at) : 0;
+        const isAuthenticated = !!(row && row.access_token && (expiresAt > Date.now() || row.refresh_token));
+
+        if (isAuthenticated) {
+            return res.redirect('/dashboard.html');
+        }
+
+        return res.redirect(buildApprovalMaxAuthUrl());
+    } catch (error) {
+        console.error('/go routing error:', error);
+        // Safe fallback - punt them to the homepage where they can manually fix it.
+        res.redirect('/');
     }
 });
 
@@ -661,7 +703,8 @@ app.get('/callback/approvalmax', async (req, res) => {
         res.send(`
             <h1>ApprovalMax Authentication Successful</h1>
             <p>Access token stored in DB. ${orgCount} organisation(s) linked. Refresh token ready.</p>
-            <script>setTimeout(() => { window.location.href = '/'; }, 3000);</script>
+            <p>Loading dashboard…</p>
+            <script>setTimeout(() => { window.location.href = '/dashboard.html'; }, 1500);</script>
         `);
     } catch (error) {
         console.error('Callback error:', error);

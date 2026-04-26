@@ -669,13 +669,14 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
 
 <div class="auth-prompt" id="authPrompt" style="display: none;">
     <h2>Not connected to ApprovalMax</h2>
-    <p>This dashboard pulls live data from the ApprovalMax API. You need to authenticate the integration before data can be loaded.</p>
-    <a href="/">Go to authentication</a>
+    <p>The connection has expired or hasn't been set up yet. Click below to reconnect — you'll be sent to ApprovalMax to allow access, then brought straight back here.</p>
+    <a href="/go">Connect ApprovalMax</a>
 </div>
 
 <div class="footer">
     <div>RAC ApprovalMax · Cross-entity dashboard</div>
     <div>Data refresh: <span id="footerRefresh">loading</span></div>
+    <div><a href="/go?force=1" style="color: var(--ink-mute); text-decoration: none; border-bottom: 1px dotted var(--line-2);">Reconnect</a></div>
 </div>
 
 <script>
