@@ -243,6 +243,23 @@ function isInternalCorporate(po) {
     return false;
 }
 
+// Pull Job tracking-category options off line items. AM exposes tracking
+// at line level (categoryName: "Job", optionName: "FG 6", etc.). We
+// don't pre-process these on the PO — we just walk lineItems here so
+// the categoriser is self-contained regardless of who calls it.
+function extractJobOptions(po) {
+    const jobs = new Set();
+    for (const li of (po.lineItems || [])) {
+        if (!Array.isArray(li.tracking)) continue;
+        for (const t of li.tracking) {
+            if (t && t.categoryName === 'Job' && t.optionName) {
+                jobs.add(t.optionName);
+            }
+        }
+    }
+    return Array.from(jobs);
+}
+
 function dominantAccountCode(po) {
     const totals = {};
     for (const li of (po.lineItems || [])) {
@@ -272,22 +289,20 @@ function classifyPO(po) {
 
     // ── Job-based override ──────────────────────────────────────────
     // If a line on this PO carries a Job tag matching the funeral
-    // pattern (FG <number>, F<number>, or "Funeral"-prefixed), the
-    // team has explicitly told us this is funeral spend. Trust them
-    // over any supplier/account/description inference downstream.
-    if (Array.isArray(po.jobCodes)) {
-        const funeralJob = po.jobCodes.find(j =>
-            /^FG\s*\d+\b/i.test(j) ||
-            /^F\s*\d+\b/i.test(j) ||
-            /funeral/i.test(j)
-        );
-        if (funeralJob) {
-            return {
-                category: 'Family Funeral Support',
-                confidence: 'high',
-                reason: `Job tag "${funeralJob}"`
-            };
-        }
+    // pattern, the team has explicitly told us this is funeral spend.
+    // Trust them over any supplier/account/description inference.
+    const jobOptions = extractJobOptions(po);
+    const funeralJob = jobOptions.find(j =>
+        /^FG\s*\d+\b/i.test(j) ||
+        /^F\s*\d+\b/i.test(j) ||
+        /funeral/i.test(j)
+    );
+    if (funeralJob) {
+        return {
+            category: 'Family Funeral Support',
+            confidence: 'high',
+            reason: `Job tag "${funeralJob}"`
+        };
     }
 
     for (const combo of SUPPLIER_ACCOUNT_COMBOS) {
