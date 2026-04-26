@@ -294,7 +294,6 @@ function classifyPO(po) {
     const jobOptions = extractJobOptions(po);
     const funeralJob = jobOptions.find(j =>
         /^FG\s*\d+\b/i.test(j) ||
-        /^F\s*\d+\b/i.test(j) ||
         /funeral/i.test(j)
     );
     if (funeralJob) {
