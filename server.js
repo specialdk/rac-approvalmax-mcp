@@ -6,6 +6,7 @@ const fetch = require('node-fetch');
 const { Pool } = require('pg');
 const amClient = require('./approvalmax-client');
 const welfare = require('./welfare-categoriser');
+const { makeDrilldownHandler } = require('./welfare-drilldown');
 const {
     handleBudgetVsActual,
     makeUnknownReconciliationHandler,
@@ -420,6 +421,18 @@ app.get('/api/draft-cleanup', makeDraftCleanupHandler({
     maxPages: MAX_PAGES_FOR_ENTITY_SCAN
 }));
 
+// Per-PO drilldown for any welfare category — used for reconciliation
+// against Xero account exports. Hit with ?category=Family%20Funeral%20Support
+app.get('/api/welfare/aboriginal-corp/drilldown', makeDrilldownHandler({
+    amClient,
+    fetchAllPages,
+    requireToken,
+    welfare,
+    companyId: ABORIGINAL_CORP_COMPANY_ID,
+    defaultFyStart: DEFAULT_WELFARE_FY_START,
+    maxPages: MAX_PAGES_FOR_WELFARE
+}));
+
 // ────────────────────────────────────────────────────────────────────────
 // Homepage — admin / OAuth-setup and ad-hoc test controls.
 // This is the page used to re-authenticate ApprovalMax and to poke at
@@ -541,6 +554,7 @@ app.get('/', (req, res) => {
                 <button onclick="callApi('/api/am/entity-scan')" id="btn-entity-scan" class="scan-btn">Entity scan (slow, ~60s)</button>
                 <button onclick="callApi('/api/budget-vs-actual')" id="btn-budget">Budget vs Actual (all 5)</button>
                 <button onclick="callApi('/api/welfare/aboriginal-corp')" id="btn-welfare">Welfare view (Aborig. Corp)</button>
+                <button onclick="callApi('/api/welfare/aboriginal-corp/drilldown?category=Family%20Funeral%20Support')" id="btn-drilldown">Drilldown: Funeral POs</button>
                 <button onclick="callApi('/api/unknown-reconciliation?entity=enterprises')" id="btn-recon">Unknown recon (Enterprises)</button>
                 <button onclick="callApi('/api/draft-cleanup?entity=enterprises')" id="btn-draft">Draft cleanup (Enterprises)</button>
             </div>
