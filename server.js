@@ -193,22 +193,30 @@ function summarisePosShape(pos) {
         supplierTotals[supplier] = (supplierTotals[supplier] || 0) + (po.total || 0);
         supplierCounts[supplier] = (supplierCounts[supplier] || 0) + 1;
 
-        if (Array.isArray(po.lineItems)) {
-            for (const li of po.lineItems) {
-                const code = li.accountCode;
-                if (!code) continue;
-                if (!accountTotals[code]) {
-                    accountTotals[code] = {
-                        accountCode: code,
-                        account: li.account || null,
-                        total: 0,
-                        poCount: 0
-                    };
-                }
-                accountTotals[code].total += (li.amount || 0);
-                accountTotals[code].poCount += 1;
+        // TEMP DIAGNOSTIC - remove once we've verified shape
+if (!global.__loggedSampleLine) {
+    console.log('SAMPLE LINE ITEM:', JSON.stringify(po.lineItems[0], null, 2));
+    global.__loggedSampleLine = true;
+}
+
+       if (Array.isArray(po.lineItems)) {
+    for (const li of po.lineItems) {
+        // Existing account aggregation stays as-is
+        const code = li.accountCode;
+        if (code) {
+            // ... existing accountTotals code
+        }
+        
+        // NEW: capture tracking categories (Jobs)
+        // AM exposes these as li.tracking = [{ category: "Jobs", value: "FG 6" }]
+        // Shape needs verification — see below.
+        if (Array.isArray(li.tracking)) {
+            for (const t of li.tracking) {
+                // store t.category + t.value alongside this line
             }
         }
+    }
+}
     }
 
     const r2 = n => Math.round((n + Number.EPSILON) * 100) / 100;

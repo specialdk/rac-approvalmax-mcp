@@ -97,6 +97,8 @@ const NON_PERSON_NAMES = new Set([
 // -----------------------------------------------------------------------------
 // Rule sets
 // -----------------------------------------------------------------------------
+
+
 const SUPPLIER_ACCOUNT_COMBOS = [
     { supplierPattern: /\bbp\b/i, accountCodes: ['63415'], category: 'Family Charitable Payments', confidence: 'high', reason: 'BP + 63415 → member fuel voucher' },
     { supplierPattern: /gove warehouse/i, accountCodes: ['64480'], category: 'Whitegoods', confidence: 'high', reason: 'Gove Warehouse + 64480 → whitegoods/appliances' }
@@ -265,6 +267,7 @@ function classifyPO(po) {
     const dominantAcct = dominantAccountCode(po);
     const accountCode = dominantAcct ? dominantAcct.accountCode : null;
 
+    
     if (isInternalCorporate(po)) return { excluded: 'internal_corporate' };
 
     for (const combo of SUPPLIER_ACCOUNT_COMBOS) {
