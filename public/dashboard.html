@@ -192,6 +192,74 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
     .panel-quickstats { border-left: none; border-top: 1px solid var(--line-2); padding-left: 0; padding-top: 16px; }
     .gov-metrics { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ────── AI Chat Widget ────── */
+#chatToggle {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--terra);
+    color: var(--paper);
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+    font-size: 22px;
+    z-index: 1000;
+    transition: transform 0.15s ease;
+}
+#chatToggle:hover { transform: scale(1.05); }
+#chatToggle.hidden { display: none; }
+
+#chatPanel {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 380px;
+    max-width: calc(100vw - 32px);
+    height: 600px;
+    max-height: calc(100vh - 48px);
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-top: 4px solid var(--terra);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    display: none;
+    flex-direction: column;
+    z-index: 1001;
+    font-family: inherit;
+}
+#chatPanel.open { display: flex; }
+
+.chat-header { padding: 14px 18px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; }
+.chat-header-title { font-size: 14px; font-weight: 600; color: var(--ink); }
+.chat-header-sub { font-size: 10px; color: var(--ink-mute); margin-top: 2px; font-family: 'IBM Plex Mono', monospace; text-transform: uppercase; letter-spacing: 1.2px; }
+.chat-close { background: none; border: none; cursor: pointer; color: var(--ink-mute); font-size: 22px; padding: 0 4px; line-height: 1; }
+.chat-close:hover { color: var(--ink); }
+
+.chat-messages { flex: 1; overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+
+.chat-message { max-width: 85%; padding: 10px 14px; line-height: 1.5; font-size: 14px; }
+.chat-message.user { background: var(--terra); color: var(--paper); align-self: flex-end; }
+.chat-message.assistant { background: var(--card); color: var(--ink); align-self: flex-start; border: 1px solid var(--line-2); white-space: pre-wrap; }
+.chat-message.error { background: #fef2f2; color: #dc2626; align-self: flex-start; border: 1px solid #fca5a5; font-size: 13px; }
+.chat-typing { color: var(--ink-mute); font-style: italic; font-size: 13px; align-self: flex-start; }
+
+.chat-suggestions { display: flex; flex-direction: column; gap: 6px; padding: 0 18px 8px; }
+.chat-suggestion { text-align: left; background: transparent; border: 1px solid var(--line-2); padding: 9px 12px; cursor: pointer; font-size: 12px; color: var(--ink); line-height: 1.4; font-family: inherit; }
+.chat-suggestion:hover { background: var(--card); border-color: var(--terra); }
+
+.chat-input-row { border-top: 1px solid var(--line); padding: 12px 14px; display: flex; gap: 8px; align-items: flex-end; }
+.chat-input { flex: 1; border: 1px solid var(--line-2); padding: 10px 12px; font-family: inherit; font-size: 14px; resize: none; color: var(--ink); background: var(--paper); min-height: 40px; max-height: 120px; }
+.chat-input:focus { outline: none; border-color: var(--terra); }
+.chat-send { background: var(--terra); color: var(--paper); border: none; padding: 10px 16px; cursor: pointer; font-family: 'IBM Plex Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; height: 40px; }
+.chat-send:disabled { background: var(--ink-mute); cursor: not-allowed; }
+
+.chat-footer-note { padding: 6px 18px 10px; font-size: 9px; color: var(--ink-mute); text-align: center; font-family: 'IBM Plex Mono', monospace; text-transform: uppercase; letter-spacing: 1.2px; }
+
+@media (max-width: 500px) { #chatPanel { right: 12px; bottom: 12px; width: calc(100vw - 24px); } }
+
 </style>
 </head>
 <body>
@@ -671,6 +739,31 @@ code, .mono { font-family: 'IBM Plex Mono', monospace; }
     <h2>Not connected to ApprovalMax</h2>
     <p>The connection has expired or hasn't been set up yet. Click below to reconnect — you'll be sent to ApprovalMax to allow access, then brought straight back here.</p>
     <a href="/go">Connect ApprovalMax</a>
+</div>
+
+<button id="chatToggle" onclick="toggleChat()" aria-label="Open assistant">💬</button>
+
+<div id="chatPanel">
+    <div class="chat-header">
+        <div>
+            <div class="chat-header-title">Dashboard assistant</div>
+            <div class="chat-header-sub">Sees what's loaded on this page</div>
+        </div>
+        <button class="chat-close" onclick="toggleChat()" aria-label="Close">×</button>
+    </div>
+    <div class="chat-messages" id="chatMessages"></div>
+    <div class="chat-suggestions" id="chatSuggestions">
+        <button class="chat-suggestion" onclick="sendSuggestion(this)">Where are we tracking against budget overall?</button>
+        <button class="chat-suggestion" onclick="sendSuggestion(this)">Which entity has the most on-approval POs?</button>
+        <button class="chat-suggestion" onclick="sendSuggestion(this)">Anything unusual in the draft counts?</button>
+        <button class="chat-suggestion" onclick="sendSuggestion(this)">Summarise top suppliers across all entities</button>
+    </div>
+    <div class="chat-input-row">
+        <textarea id="chatInput" class="chat-input" placeholder="Ask about the dashboard…" rows="1"
+            onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendChat();}"></textarea>
+        <button class="chat-send" id="chatSend" onclick="sendChat()">Send</button>
+    </div>
+    <div class="chat-footer-note">Claude Haiku · only sees this page's data</div>
 </div>
 
 <div class="footer">
@@ -1489,6 +1582,133 @@ async function boot() {
     loadWelfare();
     loadEntityScan();
     loadBudgetVsActual();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//   AI chat widget
+// ═══════════════════════════════════════════════════════════════════════════
+
+const CHAT_DAILY_SOFT_LIMIT = 50;
+const chatHistory = [];
+
+function toggleChat() {
+    const panel = document.getElementById('chatPanel');
+    const button = document.getElementById('chatToggle');
+    const isOpen = panel.classList.toggle('open');
+    button.classList.toggle('hidden', isOpen);
+    if (isOpen) document.getElementById('chatInput').focus();
+}
+
+function buildChatContext() {
+    // Curate a clean snapshot. Leave out raw PO arrays - too big, not
+    // useful for chat. Send aggregates and per-entity rollups only.
+    const ctx = {
+        asOf: new Date().toISOString(),
+        fyDay: document.getElementById('fyDay')?.textContent || null
+    };
+    if (state.welfare) ctx.welfareSummary = state.welfare;
+    if (state.scan) {
+        // entitySummaries is the meat. Top suppliers and top accounts
+        // are already trimmed to top-N inside each entity.
+        ctx.entityScan = {
+            entitySummaries: state.scan.entitySummaries,
+            governance: state.scan.governance,
+            totals: state.scan.totals
+        };
+    }
+    if (state.budget) ctx.budgetVsActual = state.budget;
+    return ctx;
+}
+
+function appendMessage(role, text) {
+    const container = document.getElementById('chatMessages');
+    const div = document.createElement('div');
+    div.className = 'chat-message ' + role;
+    div.textContent = text;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+    return div;
+}
+
+function appendError(text) {
+    const container = document.getElementById('chatMessages');
+    const div = document.createElement('div');
+    div.className = 'chat-message error';
+    div.textContent = text;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+}
+
+function getChatDailyCount() {
+    const today = new Date().toISOString().slice(0, 10);
+    const stored = window.__chatCounter || { date: today, count: 0 };
+    if (stored.date !== today) return { date: today, count: 0 };
+    return stored;
+}
+
+function bumpChatDailyCount() {
+    const c = getChatDailyCount();
+    c.count += 1;
+    window.__chatCounter = c;
+    return c.count;
+}
+
+function sendSuggestion(btn) {
+    document.getElementById('chatInput').value = btn.textContent.trim();
+    sendChat();
+}
+
+async function sendChat() {
+    const input = document.getElementById('chatInput');
+    const sendBtn = document.getElementById('chatSend');
+    const text = input.value.trim();
+    if (!text) return;
+
+    const suggestions = document.getElementById('chatSuggestions');
+    if (suggestions) suggestions.style.display = 'none';
+
+    const dailyCount = bumpChatDailyCount();
+    if (dailyCount > CHAT_DAILY_SOFT_LIMIT) {
+        appendError('You\'ve sent ' + dailyCount + ' messages today — that\'s a lot. Refresh the page to reset.');
+        return;
+    }
+
+    appendMessage('user', text);
+    chatHistory.push({ role: 'user', content: text });
+    input.value = '';
+    sendBtn.disabled = true;
+
+    const typingEl = document.createElement('div');
+    typingEl.className = 'chat-typing';
+    typingEl.textContent = 'Thinking…';
+    document.getElementById('chatMessages').appendChild(typingEl);
+
+    try {
+        const res = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                messages: chatHistory,
+                dashboardContext: buildChatContext()
+            })
+        });
+        const data = await res.json();
+        typingEl.remove();
+        if (!res.ok || !data.success) {
+            appendError('Couldn\'t get an answer — ' + (data.error || 'unknown error'));
+            chatHistory.pop(); // don't keep the failed exchange
+            return;
+        }
+        appendMessage('assistant', data.text);
+        chatHistory.push({ role: 'assistant', content: data.text });
+    } catch (err) {
+        typingEl.remove();
+        appendError('Network error — ' + err.message);
+        chatHistory.pop();
+    } finally {
+        sendBtn.disabled = false;
+        input.focus();
+    }
 }
 
 boot();

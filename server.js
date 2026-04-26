@@ -737,6 +737,111 @@ app.get('/auth/status', async (req, res) => {
     }
 });
 
+// ─────────────────────────────────────────────────────────────────────
+// Chat endpoint - calls Anthropic API on behalf of the dashboard.
+// Browser sends conversation history + a snapshot of what's loaded on
+// the page. We turn that into a system prompt and call Claude. The
+// API key lives in Railway env vars - never goes to the browser.
+// ─────────────────────────────────────────────────────────────────────
+
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const ANTHROPIC_MODEL = 'claude-haiku-4-5-20251001';
+const ANTHROPIC_MAX_TOKENS = 1500;
+const MAX_HISTORY_TURNS = 10;
+
+app.post('/api/chat', async (req, res) => {
+    if (!ANTHROPIC_API_KEY) {
+        return res.status(500).json({
+            error: 'ANTHROPIC_API_KEY not set in Railway env vars'
+        });
+    }
+
+    try {
+        const { messages, dashboardContext } = req.body || {};
+
+        if (!Array.isArray(messages) || messages.length === 0) {
+            return res.status(400).json({ error: 'messages array required' });
+        }
+
+        // Cap history regardless of what the client sends, so cost stays
+        // predictable as the conversation grows.
+        const trimmed = messages.slice(-MAX_HISTORY_TURNS * 2);
+
+        const systemPrompt = buildChatSystemPrompt(dashboardContext);
+
+        const anthropicResponse = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': ANTHROPIC_API_KEY,
+                'anthropic-version': '2023-06-01'
+            },
+            body: JSON.stringify({
+                model: ANTHROPIC_MODEL,
+                max_tokens: ANTHROPIC_MAX_TOKENS,
+                system: systemPrompt,
+                messages: trimmed
+            })
+        });
+
+        const data = await anthropicResponse.json();
+
+        if (!anthropicResponse.ok) {
+            console.error('Anthropic API error:', data);
+            return res.status(anthropicResponse.status).json({
+                success: false,
+                error: data?.error?.message || 'Chat service error'
+            });
+        }
+
+        const text = (data.content || [])
+            .filter(block => block.type === 'text')
+            .map(block => block.text)
+            .join('\n');
+
+        res.json({
+            success: true,
+            text,
+            usage: data.usage
+        });
+
+    } catch (error) {
+        console.error('Chat endpoint error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+function buildChatSystemPrompt(ctx) {
+    const today = new Date().toISOString().slice(0, 10);
+    return `You are an assistant embedded in the RAC ApprovalMax cross-entity procurement dashboard. You help RAC finance staff (CFO Paul, accountant Matt, CEO Rhian) understand the data shown on the page.
+
+TODAY: ${today}
+
+YOUR SCOPE:
+- Answer using ONLY the dashboard data provided below.
+- Lead with the answer, no preamble. Keep responses tight.
+- If the question is outside the dashboard data, say so plainly and suggest what they could check instead. Do NOT invent numbers.
+- Prefer comparisons (entity vs entity, vs budget, vs FY pace) over raw lists.
+- Format: short paragraphs or tight bullets. No headings unless the question is genuinely structured.
+
+THREE GOLDEN RULES (apply when interpreting the data):
+1. Financial figures show approved + on-approval POs only. Drafts and rejected/cancelled are excluded.
+2. PO counts exclude drafts. Drafts are abandoned form-state, surfaced separately.
+3. Drafts can only be deleted by their original raiser. Draft hygiene is a culture issue, not an admin one.
+
+ENTITIES (use the short labels in answers):
+- Aborig Corp = Rirratjingu Aboriginal Corporation (welfare-heavy, grant funded)
+- Enterprises = Rirratjingu Enterprises (trading)
+- RPMMS = Property Management & Maintenance
+- Mining = Rirratjingu Mining
+- Invest = Investments / Miliditjpi Trust (capital works)
+
+DASHBOARD SNAPSHOT (what the user is currently looking at):
+${JSON.stringify(ctx || { note: 'No dashboard data was sent.' }, null, 2)}
+`;
+}
+
+
 // ═════════════════════════════════════════════════════════════════════════
 // REAL API ENDPOINTS
 // ═════════════════════════════════════════════════════════════════════════
