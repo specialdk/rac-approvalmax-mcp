@@ -246,9 +246,19 @@ function summarisePosShape(pos) {
             poCount: supplierCounts[name] || 0
         }));
 
-    const topAccountsByValue = Object.values(accountTotals)
+    // The full sorted list of every account code that appeared on
+    // approved/onApproval POs. We compute this once, then derive the
+    // top-5 from it for backwards compatibility.
+    //
+    // Added 2026-05 to support per-account AM-vs-Xero coverage view in
+    // the sibling rac-xero-procurement dashboard. The procurement
+    // dashboard shows Xero spend per expense account; this field lets
+    // it overlay the AM-governed share for each account.
+    //
+    // Existing consumers of topAccountsByValue are unaffected — that
+    // field still returns exactly the top-5 records as before.
+    const allAccountsByValue = Object.values(accountTotals)
         .sort((a, b) => b.total - a.total)
-        .slice(0, 5)
         .map(a => ({
             accountCode: a.accountCode,
             account: a.account,
@@ -256,12 +266,15 @@ function summarisePosShape(pos) {
             poCount: a.poCount
         }));
 
+    const topAccountsByValue = allAccountsByValue.slice(0, 5);
+
     return {
         // Financial figures (committed/spend) — approved + onApproval only
         totalValue: r2(totalValue),
         financialPosCount,
         topSuppliersByValue,
         topAccountsByValue,
+        allAccountsByValue,
         uniqueSuppliers: Object.keys(supplierTotals).length,
         uniqueAccountCodes: Object.keys(accountTotals).length,
 
